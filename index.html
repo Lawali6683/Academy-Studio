@@ -35,8 +35,7 @@
       <span id="offState" class="off-state"></span>
     </div>
     <div class="sto" id="stoBox">
-      <div class="sto-top"><span><i class="fa-solid fa-hard-drive"></i> Ajiyar app</span><b id="stoText">...</b></div>
-      <div class="bar"><i id="stoBar"></i></div>
+      <div class="sto-top"><span><i class="fa-solid fa-hard-drive"></i> An yi amfani da</span><b id="stoText">...</b></div>
     </div>
     <h2 class="sec"><i class="fa-solid fa-folder-open"></i> Project ɗinka</h2>
     <div id="projList" class="plist"></div>
@@ -50,25 +49,18 @@
 <section id="library" class="screen">
   <header class="top">
     <button id="libBack" class="icon-btn" aria-label="Rufe"><i class="fa-solid fa-xmark"></i></button>
-    <div class="title"><b id="libTitle">Zaɓi bidiyo ko hoto</b><small id="libCrumb">Zaɓi da yawa, babu iyaka</small></div>
-    <button id="libAll" class="btn slim"><i class="fa-solid fa-list-check"></i> Duka</button>
+    <div class="title"><b id="libTitle">Ƙara a ƙarshe</b><small>Zaɓi da yawa, babu iyaka</small></div>
   </header>
   <div class="pick-row">
-    <button id="pickAll" class="btn prim"><i class="fa-solid fa-photo-film"></i> Buɗe gallery</button>
+    <button id="pickAll" class="btn prim big-pick"><i class="fa-solid fa-photo-film"></i> Zaɓi bidiyo / hotuna</button>
     <button id="pickDir" class="btn"><i class="fa-solid fa-folder-tree"></i> Folder</button>
-    <button id="pickLink" class="btn hidden"><i class="fa-solid fa-link"></i> Haɗa folder</button>
   </div>
-  <div class="chips" id="dirRow"></div>
-  <div class="chips" id="fchips"></div>
-  <div class="chips" id="tchips">
-    <button class="chip on" data-f="all"><i class="fa-solid fa-layer-group"></i> Duka</button>
-    <button class="chip" data-f="video"><i class="fa-solid fa-film"></i> Bidiyo</button>
-    <button class="chip" data-f="image"><i class="fa-solid fa-image"></i> Hotuna</button>
-  </div>
+  <h2 class="sec lib-sec"><i class="fa-solid fa-box-archive"></i> Cikin app (waɗanda ka taɓa shigarwa) · <span id="appCount">0</span></h2>
   <div id="libGrid" class="grid"></div>
   <footer class="tray">
-    <div id="trayItems" class="tray-items"><span class="tray-hint">Danna fayil don zaɓa, za a lissafa su 1, 2, 3…</span></div>
-    <button id="btnAdd" class="cta" disabled><i class="fa-solid fa-check"></i><span>Ƙara</span><b id="addCount">0</b></button>
+    <div class="tray-head"><b id="trayTitle">Waɗanda ka zaɓa (0)</b><button id="trayClear" class="btn slim hidden"><i class="fa-solid fa-xmark"></i> Cire duka</button></div>
+    <div id="trayItems" class="tray-items"></div>
+    <button id="btnAdd" class="cta add-btn" disabled><i class="fa-solid fa-check"></i><span>Ƙara</span><b id="addCount">0</b></button>
   </footer>
 </section>
 
@@ -120,10 +112,14 @@
             <select id="selNr"><option value="low">Kaɗan</option><option value="medium">Matsakaici</option><option value="high" selected>Sosai (muryar magana kawai)</option></select>
           </label>
           <div class="row between">
-            <span><i class="fa-solid fa-closed-captioning"></i> Rubuta abin da ake faɗi yayin rikodi</span>
+            <span><i class="fa-solid fa-closed-captioning"></i> Rubuta kai tsaye bayan kowane rikodi</span>
             <button id="swAutoCap" class="switch"><span></span></button>
           </div>
-          <label class="sl"><span><i class="fa-solid fa-volume-high"></i> Ƙarfin muryar rikodi</span><input id="voVol" type="range" min="0" max="200" value="100"><b id="voVolV">100%</b></label>
+          <label class="sl"><span><i class="fa-solid fa-volume-high"></i> Ƙarfin muryar rikodi (duka)</span><input id="voVol" type="range" min="0" max="400" value="100"><b id="voVolV">100%</b></label>
+          <div class="row">
+            <button id="btnVoBoost" class="btn prim"><i class="fa-solid fa-arrow-up-right-dots"></i> Ƙara murya sosai</button>
+            <button id="btnVoBoostAll" class="btn"><i class="fa-solid fa-layer-group"></i> Duka scenes</button>
+          </div>
           <div class="row">
             <button id="btnVoPlay" class="btn"><i class="fa-solid fa-headphones"></i> Saurara</button>
             <button id="btnVoDel" class="btn danger"><i class="fa-solid fa-trash"></i> Goge murya</button>
@@ -139,11 +135,11 @@
           </div>
           <div class="sep"></div>
           <div class="row between">
-            <span><i class="fa-solid fa-volume-high"></i> Sautin bidiyo na asali</span>
+            <span><i class="fa-solid fa-volume-high"></i> Kashe sautin asali idan akwai murya (kai tsaye)</span>
             <button id="swOrig" class="switch on"><span></span></button>
           </div>
-          <label class="sl"><span>Ƙarfin sautin asali</span><input id="origVol" type="range" min="0" max="200" value="100"><b id="origVolV">100%</b></label>
-          <p class="hint">Idan ka bar sautin asali a kunne tare da muryarka, za a ji duka biyu.</p>
+          <label class="sl"><span>Ƙarfin sautin asali (duka)</span><input id="origVol" type="range" min="0" max="200" value="100"><b id="origVolV">100%</b></label>
+          <p class="hint">Waɗannan saitunan suna aiki a kan duk scenes a lokaci ɗaya, kuma suna tafiya da kai zuwa kowane project.</p>
         </div>
 
         <div class="pn" data-panel="text">
@@ -151,14 +147,20 @@
             <textarea id="capText" rows="4" placeholder="Rubuta abin da ake faɗi a nan..."></textarea>
           </label>
           <div class="box">
-            <b class="box-t"><i class="fa-solid fa-wand-magic-sparkles"></i> Rubutu na atomatik</b>
+            <b class="box-t"><i class="fa-solid fa-wand-magic-sparkles"></i> Rubutu na atomatik (daga murya)</b>
             <label class="fld"><span>Daga ina za a rubuta?</span>
               <select id="capSrc"><option value="vo">Muryar da aka yi rikodi</option><option value="orig">Sautin bidiyo na asali</option></select>
             </label>
             <label class="fld"><span><i class="fa-solid fa-language"></i> Harshe</span><select id="selLang"></select></label>
+            <label class="fld"><span><i class="fa-solid fa-gauge"></i> Daidaito</span>
+              <select id="selAsr"><option value="tiny">Sauri (~40MB)</option><option value="base">Daidai (~75MB)</option><option value="small">Mafi daidai (~250MB, ga Hausa da Yoruba)</option></select>
+            </label>
             <button id="btnAutoCap" class="big violet"><i class="fa-solid fa-closed-captioning"></i> Rubuta kai tsaye</button>
-            <p class="hint">Ana rubuta magana kawai, ba kiɗa ko hayaniya ba. Yana wasa a lokacin da scene yake, sai ya gama.</p>
+            <p class="hint">Ana rubuta magana kawai, da lokacinta daidai. A karon farko yana sauke samfurin (sau ɗaya), daga nan yana aiki ko babu intanet.</p>
           </div>
+          <label class="fld"><span><i class="fa-solid fa-wand-magic-sparkles"></i> Motsin rubutu (kamar YouCut)</span>
+            <select id="selCapAnim"><option value="pop">Pop</option><option value="slide">Zamiya</option><option value="fade">Fade</option><option value="type">Rubuta a hankali</option><option value="none">Babu</option></select>
+          </label>
           <p class="hint">Rubutun yana fitowa a ƙasan bidiyo, ba a kan hoto ba. Layi ɗaya kawai a lokaci, yana canzawa zuwa na gaba ne kawai idan wani ya zo.</p>
           <button id="btnCapClear" class="btn danger"><i class="fa-solid fa-eraser"></i> Goge rubutu</button>
         </div>
@@ -220,7 +222,7 @@
           </div>
           <button id="btnTransAll" class="btn"><i class="fa-solid fa-clone"></i> Saka wannan salo a duka scenes</button>
           <label class="fld"><span><i class="fa-solid fa-crop-simple"></i> Yadda ake nuna bidiyo a allo</span>
-            <select id="selFit"><option value="fit">Cikakke, ba a yanke (tare da blur a gefe)</option><option value="fill">Cika allo gaba ɗaya (a yanke gefe)</option></select>
+            <select id="selFit"><option value="fit">Yadda yake (ba a yanke)</option><option value="fill">Cika allo gaba ɗaya (a yanke gefe)</option></select>
           </label>
         </div>
 
