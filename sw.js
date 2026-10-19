@@ -1,4 +1,4 @@
-const CACHE = 'bidiyo-studio-v2';
+const CACHE = 'bidiyo-studio-v3';
 const CORE = ['./', 'index.html', 'index.css', 'index.js', 'manifest.webmanifest'];
 const FA = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css';
 const EXT = [FA, 'https://i.imgur.com/oyqM5oF.png'];
@@ -38,6 +38,10 @@ self.addEventListener('fetch', e => {
   if (r.method !== 'GET') return;
   const url = new URL(r.url);
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
+  const same = url.origin === self.location.origin;
+  const allowed = url.hostname === 'cdnjs.cloudflare.com' || url.hostname === 'i.imgur.com';
+  if (!same && !allowed) return;
+  if (r.headers.has('range')) return;
   e.respondWith((async () => {
     const c = await caches.open(CACHE);
     const hit = await c.match(r);
