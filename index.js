@@ -10,7 +10,7 @@ const LOOSE = "Fayiloli da aka ɗauko";
 const ALLF = '__all';
 const VEXT = new Set(['mp4', 'mov', 'm4v', 'webm', 'mkv', 'avi', '3gp', 'ogv']);
 const IEXT = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif']);
-const LANGS = [['en-US', 'English'], ['ha-NG', 'Hausa'], ['yo-NG', 'Yoruba'], ['ig-NG', 'Igbo'], ['fr-FR', 'Français'], ['ar-SA', 'العربية'], ['sw-KE', 'Kiswahili'], ['es-ES', 'Español'], ['pt-PT', 'Português'], ['de-DE', 'Deutsch'], ['hi-IN', 'हिन्दी'], ['zh-CN', '中文'], ['tr-TR', 'Türkçe'], ['ru-RU', 'Русский']];
+const LANGS = [['auto', 'Gane kai tsaye (auto)'], ['en-US', 'English'], ['ha-NG', 'Hausa'], ['yo-NG', 'Yoruba'], ['fr-FR', 'Français'], ['ar-SA', 'العربية'], ['sw-KE', 'Kiswahili'], ['es-ES', 'Español'], ['pt-PT', 'Português'], ['de-DE', 'Deutsch'], ['hi-IN', 'हिन्दी'], ['zh-CN', '中文'], ['tr-TR', 'Türkçe'], ['ru-RU', 'Русский']];
 const FONT = '"Segoe UI",Roboto,Arial,sans-serif';
 
 const $ = s => document.querySelector(s);
@@ -61,7 +61,7 @@ const DB = {
       r.onerror = () => rej(r.error);
     });
   },
-  async put(k, v) {
+  async _put(k, v) {
     const db = await this.open();
     return new Promise((res, rej) => {
       const t = db.transaction('blobs', 'readwrite');
@@ -71,7 +71,7 @@ const DB = {
       t.onabort = () => rej(t.error);
     });
   },
-  async get(k) {
+  async _get(k) {
     const db = await this.open();
     return new Promise((res, rej) => {
       const r = db.transaction('blobs', 'readonly').objectStore('blobs').get(k);
@@ -79,7 +79,7 @@ const DB = {
       r.onerror = () => rej(r.error);
     });
   },
-  async del(k) {
+  async _del(k) {
     const db = await this.open();
     return new Promise(res => {
       const t = db.transaction('blobs', 'readwrite');
@@ -88,6 +88,49 @@ const DB = {
       t.onerror = () => res();
       t.onabort = () => res();
     });
+  },
+  async put(k, v) {
+    if (!k.startsWith('meta:') && v instanceof Blob && v.size > 2097152) {
+      const root = await Store.root();
+      if (root) {
+        try {
+          const fh = await root.getFileHandle('b_' + k, { create: true });
+          const w = await fh.createWritable();
+          await w.write(v);
+          await w.close();
+          await this._put(k, { __opfs: 1, type: v.type, size: v.size });
+          return;
+        } catch (e) {}
+      }
+    }
+    await this._put(k, v);
+  },
+  async get(k) {
+    const r = await this._get(k);
+    if (r && r.__opfs) {
+      try {
+        const root = await Store.root();
+        const fh = await root.getFileHandle('b_' + k);
+        const f = await fh.getFile();
+        return f.slice(0, f.size, r.type);
+      } catch (e) {
+        return undefined;
+      }
+    }
+    return r;
+  },
+  async del(k) {
+    let r = null;
+    try {
+      r = await this._get(k);
+    } catch (e) {}
+    if (r && r.__opfs) {
+      try {
+        const root = await Store.root();
+        await root.removeEntry('b_' + k);
+      } catch (e) {}
+    }
+    await this._del(k);
   }
 };
 
@@ -168,7 +211,7 @@ function saveJSON(k, v) {
 
 let projects = [];
 let media = [];
-let settings = Object.assign({ autoCap: false, lang: 'en-US', micGain: 3, nr: 'high', capSrc: 'vo' }, loadJSON(KEY_SET, {}));
+let settings = Object.assign({ autoCap: true, lang: 'en-US', micGain: 3, nr: 'high', capSrc: 'vo', micId: '', asrModel: 'base', pd: null }, loadJSON(KEY_SET, {}));
 let proj = null;
 let selIdx = -1;
 let selOv = null;
@@ -183,7 +226,9 @@ function normalizeProject(p) {
   p.logo = Object.assign({ on: true, size: 0.13, nx: 0.905, ny: 0.085, anim: true, custom: null, center: false, opacity: 0.15 }, lg);
   p.aspect = p.aspect || '9:16';
   p.res = p.res || 720;
-  p.fitMode = p.fitMode || 'fit';
+  p.fitMode = p.fitMode === 'fill' ? 'fill' : 'fit';
+  p.capAnim = p.capAnim || 'pop';
+  p.aud = Object.assign({ voVol: 1, origVol: 1, autoMute: true }, p.aud || {});
   p.ui = p.ui || { t: 0, sel: 0 };
   p.music = p.music || null;
   p.scenes.forEach(s => {
@@ -197,6 +242,7 @@ function normalizeProject(p) {
     s.trans = s.trans || 'none';
     s.motion = !!s.motion;
     s.overlays = Array.isArray(s.overlays) ? s.overlays : [];
+    s.caps = Array.isArray(s.caps) ? s.caps : null;
     if (s.type === 'video') s.trimOut = s.trimOut || s.srcDur || 1;
   });
   return p;
@@ -231,11 +277,20 @@ function persist() {
   return saveProjects().then(() => setSaved(false));
 }
 const persistSoon = debounce(persist, 500);
+const rememberDefaults = debounce(() => {
+  if (!proj) return;
+  settings.pd = {
+    aud: proj.aud, capAnim: proj.capAnim, fitMode: proj.fitMode, aspect: proj.aspect, res: proj.res, duck: proj.duck, musicVol: proj.musicVol,
+    logo: { on: proj.logo.on, size: proj.logo.size, anim: proj.logo.anim, nx: proj.logo.nx, ny: proj.logo.ny, center: proj.logo.center, opacity: proj.logo.opacity, custom: null }
+  };
+  saveJSON(KEY_SET, settings);
+}, 800);
 function touch() {
   if (!proj) return;
   proj.dirty = true;
   setSaved(true);
   persistSoon();
+  rememberDefaults();
 }
 
 const clipDur = s => (s.type === 'image' ? s.dur : Math.max(0.1, (s.trimOut - s.trimIn) / s.speed));
@@ -371,7 +426,7 @@ function mediaDuration(blob) {
   });
 }
 
-async function ingest(file) {
+async function ingest(file, pre) {
   const type = file.type.startsWith('video/') ? 'video' : file.type.startsWith('image/') ? 'image' : extOf(file.name) && VEXT.has(extOf(file.name)) ? 'video' : IEXT.has(extOf(file.name)) ? 'image' : null;
   if (!type) throw new Error('type');
   const key = keyOf(file);
@@ -382,7 +437,7 @@ async function ingest(file) {
     await DB.put(m.id, file);
     return m;
   }
-  const meta = type === 'video' ? await probeVideo(file) : await probeImage(file);
+  const meta = pre || (type === 'video' ? await probeVideo(file) : await probeImage(file));
   if (!meta || (type === 'video' && !meta.dur)) throw new Error('bad');
   const id = uid();
   await DB.put(id, file);
@@ -505,43 +560,69 @@ const A = {
   }
 };
 
-const capCache = new Map();
-function capChunks(text, g, fs, maxW) {
-  const key = text + '|' + Math.round(fs) + '|' + Math.round(maxW);
-  if (capCache.has(key)) return capCache.get(key);
-  g.font = '800 ' + fs + 'px ' + FONT;
-  const words = text.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+function splitCaption(text, max) {
+  const words = (text || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
   const out = [];
   let cur = '';
   for (const w of words) {
-    const test = cur ? cur + ' ' + w : w;
-    if (!cur || g.measureText(test).width <= maxW) cur = test;
+    if (!cur) cur = w;
+    else if ((cur + ' ' + w).length <= max) cur += ' ' + w;
     else {
       out.push(cur);
       cur = w;
     }
   }
   if (cur) out.push(cur);
-  if (capCache.size > 80) capCache.clear();
-  capCache.set(key, out);
   return out;
 }
-function captionAt(chunks, s, local) {
-  if (!chunks.length) return null;
-  const win = Math.max(0.5, s.voId ? voEff(s) : sceneDur(s));
-  const weights = chunks.map(c => c.length + 4);
-  const sum = weights.reduce((a, b) => a + b, 0);
-  const frac = clamp(local / win, 0, 0.9999);
-  let acc = 0;
-  for (let i = 0; i < chunks.length; i++) {
-    const a = acc / sum;
-    const b = (acc + weights[i]) / sum;
-    if (frac < b || i === chunks.length - 1) {
-      return { text: chunks[i], p: clamp((frac - a) / (b - a), 0, 1), age: Math.max(0, (frac - a) * win) };
-    }
-    acc += weights[i];
+const capMax = (W, H) => Math.max(14, Math.floor(32 * W / H));
+const timedCache = new WeakMap();
+function timedChunks(s, max) {
+  const hit = timedCache.get(s);
+  if (hit && hit.max === max && hit.src === s.caps && hit.text === s.text) return hit.list;
+  const list = [];
+  s.caps.forEach(seg => {
+    const parts = splitCaption(seg.text, max);
+    const wts = parts.map(x => x.length + 2);
+    const sum = wts.reduce((a, b) => a + b, 0) || 1;
+    const span = Math.max(0.3, seg.b - seg.a);
+    let t = seg.a;
+    parts.forEach((x, i) => {
+      const d = span * wts[i] / sum;
+      list.push({ a: t, b: t + d, text: x });
+      t += d;
+    });
+  });
+  timedCache.set(s, { max, src: s.caps, text: s.text, list });
+  return list;
+}
+function captionAt(s, local, max) {
+  const timed = !!(s.caps && s.caps.length && s.capsFor === s.text);
+  let list;
+  if (timed) list = timedChunks(s, max);
+  else {
+    const chunks = splitCaption(s.text, max);
+    if (!chunks.length) return null;
+    const win = Math.max(0.5, s.voId ? voEff(s) : sceneDur(s));
+    const weights = chunks.map(c => c.length + 4);
+    const sum = weights.reduce((a, b) => a + b, 0);
+    list = [];
+    let t = 0;
+    chunks.forEach((c, i) => {
+      const d = win * weights[i] / sum;
+      list.push({ a: t, b: t + d, text: c });
+      t += d;
+    });
   }
-  return null;
+  if (!list.length) return null;
+  let i = -1;
+  for (let k = 0; k < list.length; k++) {
+    if (local >= list[k].a - 1e-6) i = k;
+    else break;
+  }
+  if (i < 0) return null;
+  const c = list[i];
+  return { text: c.text, p: clamp((local - c.a) / Math.max(0.2, c.b - c.a), 0, 1), age: Math.max(0, local - c.a), prev: i > 0 ? list[i - 1].text : '' };
 }
 
 function rr(g, x, y, w, h, r) {
@@ -561,7 +642,6 @@ function mediaRect(sw, sh, x, y, w, h, mode) {
   return { x: x + (w - dw) / 2, y: y + (h - dh) / 2, w: dw, h: dh };
 }
 
-const bgC = document.createElement('canvas');
 const frC = document.createElement('canvas');
 let frAt = 0;
 let frKey = '';
@@ -590,24 +670,6 @@ function mediaSource(s, live) {
   }
   if (imEl.complete && imEl.naturalWidth) return { el: imEl, w: imEl.naturalWidth, h: imEl.naturalHeight };
   return null;
-}
-function drawBackdrop(g, src, W, H) {
-  const bw = 36;
-  const bh = Math.max(2, Math.round(bw * H / W));
-  if (bgC.width !== bw || bgC.height !== bh) {
-    bgC.width = bw;
-    bgC.height = bh;
-  }
-  const bg = bgC.getContext('2d');
-  const r = mediaRect(src.w, src.h, 0, 0, bw, bh, 'fill');
-  bg.drawImage(src.el, r.x, r.y, r.w, r.h);
-  g.save();
-  g.imageSmoothingEnabled = true;
-  g.imageSmoothingQuality = 'high';
-  g.drawImage(bgC, 0, 0, W, H);
-  g.fillStyle = 'rgba(5,8,18,0.55)';
-  g.fillRect(0, 0, W, H);
-  g.restore();
 }
 const ease = p => 1 - Math.pow(1 - clamp(p, 0, 1), 3);
 function sceneFx(s, local) {
@@ -709,71 +771,83 @@ function drawCornerLogo(g, W, H, t, ui) {
   }
 }
 
-function drawCaption(g, W, H, capH, rect, s, local) {
-  if (!capH || !(s.text || '').trim()) return;
+const backOut = t => {
+  const c1 = 1.70158;
+  const c3 = c1 + 1;
+  return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+};
+function drawCaption(g, W, H, capH, s, local, anim) {
+  if (!capH) return;
   const y = H - capH;
-  const x = rect ? Math.max(0, rect.x) : 0;
-  const w = rect ? Math.min(W, rect.w) : W;
-  g.save();
-  rr(g, x, y, w, capH, Math.max(4, capH * 0.18));
-  g.fillStyle = 'rgba(10,14,28,0.9)';
-  g.fill();
-  g.clip();
-  const lg = g.createLinearGradient(x, 0, x + w, 0);
+  const bg = g.createLinearGradient(0, y, 0, H);
+  bg.addColorStop(0, '#141b33');
+  bg.addColorStop(1, '#0a0e1c');
+  g.fillStyle = bg;
+  g.fillRect(0, y, W, capH);
+  const lg = g.createLinearGradient(0, 0, W, 0);
   lg.addColorStop(0, '#7c5cff');
   lg.addColorStop(1, '#00d1b2');
   g.fillStyle = lg;
-  g.fillRect(x, y, w, Math.max(2, Math.round(H * 0.003)));
-  g.restore();
-  let fs = capH * 0.44;
-  const maxW = w * 0.94;
-  let chunks = capChunks(s.text, g, fs, maxW);
-  while (chunks.some(c => g.measureText(c).width > maxW) && fs > capH * 0.24) {
-    fs -= 1;
-    chunks = capChunks(s.text, g, fs, maxW);
-  }
-  const cap = captionAt(chunks, s, local);
+  g.fillRect(0, y, W, Math.max(2, Math.round(H * 0.004)));
+  if (!s || !(s.text || '').trim()) return;
+  const cap = captionAt(s, local, capMax(W, H));
   if (!cap) return;
-  g.font = '800 ' + fs + 'px ' + FONT;
-  const words = cap.text.split(' ');
-  const n = clamp(Math.floor(cap.p * words.length) + 1, 1, words.length);
-  const done = words.slice(0, n).join(' ');
-  const total = g.measureText(cap.text).width;
-  const doneW = g.measureText(done).width;
-  const pop = clamp(cap.age / 0.16, 0, 1);
-  g.save();
-  g.translate(x + w / 2, y + capH / 2 + capH * 0.04);
-  const sc = 0.94 + 0.06 * pop;
-  g.scale(sc, sc);
-  g.globalAlpha = 0.5 + 0.5 * pop;
-  g.textBaseline = 'middle';
-  g.textAlign = 'left';
-  g.fillStyle = '#ffffff';
-  g.fillText(cap.text, -total / 2, 0);
-  g.save();
-  g.beginPath();
-  g.rect(-total / 2 - 4, -capH, doneW + 4, capH * 2);
-  g.clip();
-  g.fillStyle = '#ffd54a';
-  g.fillText(cap.text, -total / 2, 0);
-  g.restore();
-  g.restore();
+  const font = f => '800 ' + f + 'px ' + FONT;
+  let fs = capH * 0.42;
+  g.font = font(fs);
+  while (g.measureText(cap.text).width > W * 0.94 && fs > capH * 0.22) {
+    fs -= 1;
+    g.font = font(fs);
+  }
+  const paint = (text, alpha, dy, sc, p, reveal) => {
+    g.save();
+    g.font = font(fs);
+    const total = g.measureText(text).width;
+    g.translate(W / 2, y + capH / 2 + capH * 0.04 + dy);
+    g.scale(sc, sc);
+    g.globalAlpha = clamp(alpha, 0, 1);
+    g.textBaseline = 'middle';
+    g.textAlign = 'left';
+    const shown = reveal < 1 ? text.slice(0, Math.ceil(text.length * reveal)) : text;
+    g.shadowColor = 'rgba(0,0,0,0.6)';
+    g.shadowBlur = fs * 0.15;
+    g.fillStyle = '#ffffff';
+    g.fillText(shown, -total / 2, 0);
+    g.shadowBlur = 0;
+    const words = text.split(' ');
+    const n = clamp(Math.floor(p * words.length) + 1, 1, words.length);
+    const dw = g.measureText(words.slice(0, n).join(' ')).width;
+    g.beginPath();
+    g.rect(-total / 2 - 4, -capH, dw + 4, capH * 2);
+    g.clip();
+    g.fillStyle = '#ffd54a';
+    g.fillText(shown, -total / 2, 0);
+    g.restore();
+  };
+  const T = 0.28;
+  const k = clamp(cap.age / T, 0, 1);
+  if (anim !== 'none' && cap.prev && cap.age < 0.18) {
+    const q = cap.age / 0.18;
+    paint(cap.prev, 1 - q, -q * capH * 0.3, 1, 1, 1);
+  }
+  if (anim === 'none') paint(cap.text, 1, 0, 1, cap.p, 1);
+  else if (anim === 'slide') paint(cap.text, ease(k), (1 - ease(k)) * capH * 0.55, 1, cap.p, 1);
+  else if (anim === 'fade') paint(cap.text, ease(k), 0, 1, cap.p, 1);
+  else if (anim === 'type') paint(cap.text, 1, 0, 1, cap.p, clamp(cap.age / 0.5, 0, 1));
+  else paint(cap.text, Math.min(1, cap.age / 0.1), 0, 0.7 + 0.3 * backOut(k), cap.p, 1);
 }
 
 function drawFrame(g, W, H, t, ui) {
   g.fillStyle = '#000';
   g.fillRect(0, 0, W, H);
-  const caps = hasCaps();
-  const capH = caps ? Math.round(H * 0.07) : 0;
+  const capH = hasCaps() ? Math.round(H * 0.13) : 0;
   const vh = H - capH;
   const loc = P.locate(t);
   const s = proj.scenes[loc.i];
-  const mode = proj.fitMode || 'fit';
-  let rect = null;
+  const mode = proj.fitMode === 'fill' ? 'fill' : 'fit';
   const src = mediaSource(s, true);
   if (src) {
-    rect = mediaRect(src.w, src.h, 0, 0, W, vh, mode);
-    if (mode === 'fit' && (rect.w < W - 1 || rect.h < vh - 1)) drawBackdrop(g, src, W, H);
+    const rect = mediaRect(src.w, src.h, 0, 0, W, vh, mode);
     const fx = sceneFx(s, loc.local);
     g.save();
     g.beginPath();
@@ -815,7 +889,7 @@ function drawFrame(g, W, H, t, ui) {
     g.restore();
   }
   drawCornerLogo(g, W, H, t, ui);
-  if (s) drawCaption(g, W, H, capH, rect, s, loc.local);
+  drawCaption(g, W, H, capH, s, loc.local, proj.capAnim);
 }
 
 const P = {
@@ -890,8 +964,9 @@ const P = {
         go = this.stt === 'orig' ? 1 : 0;
         gv = this.stt === 'vo' ? 1 : 0;
       } else {
-        go = s.muteOrig ? 0 : s.origVol;
-        gv = s.voVol;
+        const a = proj.aud;
+        go = s.voId && a.autoMute ? 0 : a.origVol;
+        gv = a.voVol;
       }
     }
     A.gV.gain.setTargetAtTime(go, now, 0.01);
@@ -1236,7 +1311,6 @@ function renderTimeline() {
       '<span class="num">' + (i + 1) + '</span>' +
       '<span class="du">' + fmt1(sceneDur(s)) + '</span>' +
       '<span class="ic">' + (s.type === 'image' ? '<i class="fa-solid fa-image"></i>' : '') +
-      (s.muteOrig ? '<i class="fa-solid fa-volume-xmark"></i>' : '') +
       (s.overlays.length ? '<i class="fa-solid fa-layer-group"></i>' : '') +
       ((s.text || '').trim() ? '<i class="fa-solid fa-closed-captioning"></i>' : '') + '</span></div>';
   });
@@ -1295,6 +1369,15 @@ function syncPanel() {
   document.body.classList.toggle('noscene', !s);
   $('#voInfo').textContent = s ? (s.voId ? 'Murya da aka ajiye: ' + fmt1(s.voDur) + (s.voRate !== 1 ? ' (an daidaita: ' + s.voRate.toFixed(2) + 'x)' : '') : 'Babu murya tukuna a wannan scene.') : 'Zaɓi scene a timeline.';
   setSwitch('#swAutoCap', settings.autoCap);
+  $('#selAsr').value = settings.asrModel;
+  if (proj) {
+    $('#voVol').value = Math.round(proj.aud.voVol * 100);
+    $('#voVolV').textContent = Math.round(proj.aud.voVol * 100) + '%';
+    $('#origVol').value = Math.round(proj.aud.origVol * 100);
+    $('#origVolV').textContent = Math.round(proj.aud.origVol * 100) + '%';
+    setSwitch('#swOrig', proj.aud.autoMute);
+    $('#selCapAnim').value = proj.capAnim;
+  }
   $('#micGain').value = settings.micGain;
   $('#micGainV').textContent = settings.micGain + 'x';
   $('#selNr').value = settings.nr;
@@ -1302,11 +1385,6 @@ function syncPanel() {
   $('#capSrc').value = settings.capSrc;
   $('#voEdit').classList.toggle('hidden', !(s && s.voId));
   if (s) {
-    $('#voVol').value = Math.round(s.voVol * 100);
-    $('#voVolV').textContent = Math.round(s.voVol * 100) + '%';
-    $('#origVol').value = Math.round(s.origVol * 100);
-    $('#origVolV').textContent = Math.round(s.origVol * 100) + '%';
-    setSwitch('#swOrig', !s.muteOrig);
     $('#capText').value = s.text;
     const isV = s.type === 'video';
     $('#trimBox').classList.toggle('hidden', !isV);
@@ -1386,22 +1464,15 @@ function closeModal(id) {
 }
 
 async function updateStorage() {
-  const t = $('#stoText');
-  const b = $('#stoBar');
   let used = 0;
   media.forEach(m => (used += m.size || 0));
   try {
     if (navigator.storage && navigator.storage.estimate) {
       const e = await navigator.storage.estimate();
-      const u = e.usage || 0;
-      const q = e.quota || 0;
-      t.textContent = mb(u) + (q ? ' / ' + mb(q) : '');
-      b.style.width = q ? Math.max(1, Math.min(100, u / q * 100)) + '%' : '0%';
-      return;
+      if (e.usage) used = Math.max(used, e.usage);
     }
   } catch (e) {}
-  t.textContent = mb(used);
-  b.style.width = '0%';
+  $('#stoText').textContent = mb(used) + ' · babu iyaka a cikin app';
 }
 
 function renderHome() {
@@ -1453,7 +1524,7 @@ async function openProject(id) {
   proj = p;
   localStorage.setItem(KEY_LAST, id);
   $('#edName').value = p.name;
-  selIdx = p.scenes.length ? clamp(p.ui.sel, 0, p.scenes.length - 1) : -1;
+  selIdx = p.scenes.length ? clamp(p.ui.sel >= 0 ? p.ui.sel : 0, 0, p.scenes.length - 1) : -1;
   selOv = null;
   show('editor');
   P.refresh();
@@ -1476,141 +1547,125 @@ async function closeEditor() {
 }
 
 function newProject(name) {
-  const p = normalizeProject({ id: uid(), name, created: Date.now(), updated: Date.now(), scenes: [] });
+  const base = settings.pd ? JSON.parse(JSON.stringify(settings.pd)) : {};
+  const p = normalizeProject(Object.assign(base, { id: uid(), name, created: Date.now(), updated: Date.now(), scenes: [], music: null, out: null }));
   projects.unshift(p);
   saveProjects();
   return p;
 }
 
-const lib = { items: [], sel: [], filter: 'all', folder: ALLF, insertAt: null, dirs: [], map: new Map(), used: new Set(), keyId: new Map() };
-let io = null;
+const lib = { sel: [], insertAt: null, probing: false };
 
-function appItems() {
-  return media.map(m => ({ id: 'app_' + m.id, regId: m.id, key: m.key, name: m.name, type: m.type, folder: APPF, thumb: m.thumb, mod: m.added, size: m.size, dur: m.dur }));
+function pickedType(f) {
+  const ext = extOf(f.name);
+  if (f.type.startsWith('video/') || VEXT.has(ext)) return 'video';
+  if (f.type.startsWith('image/') || IEXT.has(ext)) return 'image';
+  return null;
 }
 
-function addLibFiles(files) {
+function addPicked(files) {
   let added = 0;
+  let again = 0;
   Array.from(files).forEach(f => {
-    const ext = extOf(f.name);
-    const type = f.type.startsWith('video/') || VEXT.has(ext) ? 'video' : f.type.startsWith('image/') || IEXT.has(ext) ? 'image' : null;
+    const type = pickedType(f);
     if (!type) return;
-    const folder = f.webkitRelativePath ? f.webkitRelativePath.split('/').slice(0, -1).join('/') || LOOSE : LOOSE;
     const key = keyOf(f);
-    if (lib.items.some(i => i.key === key && i.folder === folder)) return;
-    lib.items.push({ id: uid(), key, name: f.name, type, folder, file: f, mod: f.lastModified, size: f.size });
+    if (lib.sel.some(i => i.key === key)) return;
+    const m = media.find(x => x.key === key);
+    if (m) again++;
+    lib.sel.push({
+      id: uid(), key, name: f.name, type, file: f, size: f.size, prev: !!m,
+      meta: m ? { dur: m.dur, thumb: m.thumb, w: m.w, h: m.h } : null, thumb: m ? m.thumb : '', dur: m ? m.dur : 0
+    });
     added++;
   });
   if (!added) toast('Babu sabon bidiyo ko hoto da aka samu');
-  else toast('An ɗauko ' + added);
-  renderLib();
+  else toast('An zaɓi ' + added + (again ? ' · ' + again + ' an taɓa shigar da su (alamar ✔)' : ''));
+  refreshBadges();
+  renderTray();
+  probeQueue();
+  const tr = $('#trayItems');
+  tr.scrollTop = tr.scrollHeight;
 }
 
-function thumbHtml(it, url) {
-  return it.type === 'video'
-    ? '<video src="' + url + '#t=0.1" preload="metadata" muted playsinline></video>'
-    : '<img src="' + url + '" alt="">';
-}
-
-function viewItems() {
-  const all = lib.items.concat(appItems());
-  return all.filter(it => (lib.filter === 'all' || it.type === lib.filter) && (lib.folder === ALLF || it.folder === lib.folder));
+async function probeQueue() {
+  if (lib.probing) return;
+  lib.probing = true;
+  try {
+    for (;;) {
+      const it = lib.sel.find(i => i.file && !i.meta && !i.failed);
+      if (!it) break;
+      try {
+        const meta = it.type === 'video' ? await probeVideo(it.file) : await probeImage(it.file);
+        if (!meta || (it.type === 'video' && !meta.dur)) throw new Error('bad');
+        it.meta = meta;
+        it.thumb = meta.thumb;
+        it.dur = meta.dur || 0;
+      } catch (e) {
+        it.failed = true;
+      }
+      renderTray(true);
+    }
+  } finally {
+    lib.probing = false;
+  }
 }
 
 function renderLib() {
-  lib.map = new Map();
-  const all = lib.items.concat(appItems());
-  all.forEach(i => lib.map.set(i.id, i));
-  lib.keyId = new Map(media.map(m => [m.key, m.id]));
-  lib.used = new Set(proj ? proj.scenes.map(s => s.mediaId) : []);
-  const folders = new Map();
-  all.forEach(it => {
-    if (lib.filter !== 'all' && it.type !== lib.filter) return;
-    folders.set(it.folder, (folders.get(it.folder) || 0) + 1);
-  });
-  if (lib.folder !== ALLF && !folders.has(lib.folder)) lib.folder = ALLF;
-  let fh = '<button class="chip' + (lib.folder === ALLF ? ' on' : '') + '" data-folder="' + ALLF + '"><i class="fa-solid fa-layer-group"></i> Duka (' + Array.from(folders.values()).reduce((a, b) => a + b, 0) + ')</button>';
-  const names = Array.from(folders.keys()).sort((a, b) => (a === APPF ? -1 : b === APPF ? 1 : a.localeCompare(b)));
-  names.forEach(n => {
-    fh += '<button class="chip' + (lib.folder === n ? ' on' : '') + '" data-folder="' + esc(n) + '"><i class="fa-solid ' + (n === APPF ? 'fa-box-archive' : 'fa-folder') + '"></i> ' + esc(n.split('/').pop() || n) + ' (' + folders.get(n) + ')</button>';
-  });
-  $('#fchips').innerHTML = fh;
-  const list = viewItems().sort((a, b) => (b.mod || 0) - (a.mod || 0));
-  $('#libCrumb').textContent = list.length + ' fayil · zaɓi da yawa, babu iyaka';
+  const used = new Set(proj ? proj.scenes.map(s => s.mediaId) : []);
+  $('#appCount').textContent = media.length;
   const grid = $('#libGrid');
-  if (!all.length) {
-    grid.innerHTML = '<div class="empty" style="grid-column:1/-1"><i class="fa-solid fa-photo-film"></i><p>Danna “Buɗe gallery” don zaɓar bidiyo da hotuna da yawa a lokaci ɗaya, ko “Folder” don ɗauko folder duka.</p></div>';
-  } else if (!list.length) {
-    grid.innerHTML = '<div class="empty" style="grid-column:1/-1"><p>Babu fayil irin wannan a nan.</p></div>';
+  if (!media.length) {
+    grid.innerHTML = '<div class="empty" style="grid-column:1/-1"><i class="fa-solid fa-box-archive"></i><p>Fayilolin da ka taɓa shigarwa zasu bayyana a nan.</p></div>';
   } else {
-    let h = '';
-    list.forEach(it => {
-      const mid = it.regId || lib.keyId.get(it.key);
-      const used = mid && lib.used.has(mid);
-      h += '<div class="it' + (used ? ' used' : '') + '" data-id="' + it.id + '"' + (it.thumb ? '' : ' data-lz="1"') + '>' +
-        (it.thumb ? '<img src="' + it.thumb + '" alt="">' : '') +
-        '<span class="chk"><i class="fa-solid fa-check"></i></span><span class="nb"></span>' +
-        '<span class="tp"><i class="fa-solid ' + (it.type === 'video' ? 'fa-play' : 'fa-image') + '"></i>' + (it.dur ? '<b>' + fmt(it.dur) + '</b>' : '') + '</span>' +
-        (it.regId ? '<button class="rm" data-rm="' + it.regId + '" aria-label="Goge daga app"><i class="fa-solid fa-trash"></i></button>' : '') + '</div>';
-    });
-    grid.innerHTML = h;
-    observeThumbs();
+    grid.innerHTML = media.slice().sort((a, b) => b.added - a.added).map(m =>
+      '<div class="it' + (used.has(m.id) ? ' used' : '') + '" data-reg="' + m.id + '">' + (m.thumb ? '<img src="' + m.thumb + '" alt="">' : '') +
+      '<span class="chk"><i class="fa-solid fa-check"></i></span><span class="nb"></span>' +
+      '<span class="tp"><i class="fa-solid ' + (m.type === 'video' ? 'fa-play' : 'fa-image') + '"></i>' + (m.dur ? '<b>' + fmt(m.dur) + '</b>' : '') + '</span>' +
+      '<button class="rm" data-rm="' + m.id + '" aria-label="Goge daga app"><i class="fa-solid fa-trash"></i></button></div>').join('');
   }
   refreshBadges();
   renderTray();
 }
 
-function observeThumbs() {
-  if (io) io.disconnect();
-  io = new IntersectionObserver(es => {
-    es.forEach(e => {
-      if (e.isIntersecting) {
-        io.unobserve(e.target);
-        fillThumb(e.target);
-      }
-    });
-  }, { root: $('#libGrid'), rootMargin: '400px' });
-  $$('#libGrid .it[data-lz]').forEach(n => io.observe(n));
-}
-async function fillThumb(n) {
-  const it = lib.map.get(n.dataset.id);
-  if (!it || !it.file) return;
-  if (!it.url) it.url = URL.createObjectURL(it.file);
-  n.insertAdjacentHTML('afterbegin', thumbHtml(it, it.url));
-  n.removeAttribute('data-lz');
-}
-
 function refreshBadges() {
-  const pos = new Map(lib.sel.map((id, i) => [id, i + 1]));
+  const pos = new Map();
+  lib.sel.forEach((i, k) => {
+    if (i.regId) pos.set(i.regId, k + 1);
+  });
   $$('#libGrid .it').forEach(n => {
-    const p = pos.get(n.dataset.id);
+    const p = pos.get(n.dataset.reg);
     n.classList.toggle('on', !!p);
     n.querySelector('.nb').textContent = p || '';
   });
-  const cur = viewItems();
-  const allSel = cur.length > 0 && cur.every(i => pos.has(i.id));
-  $('#libAll').innerHTML = allSel ? '<i class="fa-solid fa-xmark"></i> Cire duka' : '<i class="fa-solid fa-list-check"></i> Duka';
 }
 
-function renderTray() {
+function renderTray(keepScroll) {
   const tray = $('#trayItems');
-  if (!lib.sel.length) tray.innerHTML = '<span class="tray-hint">Danna fayil don zaɓa, za a lissafa su 1, 2, 3…</span>';
+  const top = tray.scrollTop;
+  if (!lib.sel.length) tray.innerHTML = '<span class="tray-hint">Danna “Zaɓi bidiyo / hotuna”. Abin da ka zaɓa zai bayyana a nan, sai ka danna “Ƙara”.</span>';
   else {
-    tray.innerHTML = lib.sel.map((id, i) => {
-      const it = lib.map.get(id);
-      if (!it) return '';
-      const th = it.thumb ? '<img src="' + it.thumb + '" alt="">' : (it.url ? thumbHtml(it, it.url) : '<span class="ph0"></span>');
-      return '<div class="ti" data-id="' + id + '">' + th + '<b>' + (i + 1) + '</b><span class="tx"><i class="fa-solid fa-xmark"></i></span></div>';
+    tray.innerHTML = lib.sel.map((it, i) => {
+      const th = it.thumb ? '<img src="' + it.thumb + '" alt="">' : it.failed ? '<span class="ph0 bad"><i class="fa-solid fa-triangle-exclamation"></i></span>' : '<span class="ph0"><i class="fa-solid fa-spinner fa-spin"></i></span>';
+      return '<div class="ti" data-id="' + it.id + '">' + th + '<b>' + (i + 1) + '</b>' + (it.prev ? '<span class="pv"><i class="fa-solid fa-check"></i></span>' : '') +
+        (it.dur ? '<span class="dd">' + fmt(it.dur) + '</span>' : '') + '<span class="tx"><i class="fa-solid fa-xmark"></i></span></div>';
     }).join('');
   }
+  if (keepScroll) tray.scrollTop = top;
+  $('#trayTitle').textContent = 'Waɗanda ka zaɓa (' + lib.sel.length + ')';
+  $('#trayClear').classList.toggle('hidden', !lib.sel.length);
   $('#btnAdd').disabled = !lib.sel.length;
   $('#addCount').textContent = lib.sel.length;
 }
 
-function toggleSel(id) {
-  const i = lib.sel.indexOf(id);
+function toggleReg(id) {
+  const i = lib.sel.findIndex(x => x.regId === id);
   if (i >= 0) lib.sel.splice(i, 1);
-  else lib.sel.push(id);
+  else {
+    const m = mediaBy(id);
+    if (!m) return;
+    lib.sel.push({ id: 'app_' + id + '_' + uid(), regId: id, key: m.key, name: m.name, type: m.type, thumb: m.thumb, dur: m.dur, prev: true, meta: { dur: m.dur, thumb: m.thumb, w: m.w, h: m.h } });
+  }
   refreshBadges();
   renderTray();
 }
@@ -1638,30 +1693,33 @@ function unbusy() {
 
 async function addSelected() {
   if (!lib.sel.length || !proj) return;
-  const ids = lib.sel.slice();
+  const items = lib.sel.slice();
   busy('Ana ƙara fayiloli...', { bar: true });
   let at = lib.insertAt == null ? proj.scenes.length : clamp(lib.insertAt, 0, proj.scenes.length);
   const first = at;
   let ok = 0;
   let failed = 0;
-  for (let k = 0; k < ids.length; k++) {
-    const it = lib.map.get(ids[k]);
-    if (!it) continue;
-    busyProgress(k / ids.length, 'Ana ƙara ' + (k + 1) + ' daga ' + ids.length + '...');
+  for (let k = 0; k < items.length; k++) {
+    const it = items[k];
+    busyProgress(k / items.length, 'Ana ƙara ' + (k + 1) + ' daga ' + items.length + '...');
     try {
       let m;
       if (it.regId) m = mediaBy(it.regId);
-      else m = await ingest(it.file);
+      else {
+        if (it.failed) throw new Error('bad');
+        m = await ingest(it.file, it.meta);
+      }
       if (!m) throw new Error('x');
       proj.scenes.splice(at++, 0, makeScene(m));
       ok++;
     } catch (e) {
       failed++;
     }
+    if (k % 3 === 2) await sleep(0);
   }
   lib.sel = [];
   unbusy();
-  if (failed) toast(failed + ' ba a iya ƙara su ba (fayil ɗin ya lalace ko ajiya ta cika)');
+  if (failed) toast(failed + ' ba a iya ƙara su ba (browser bai goyi bayan format ɗin ba, ko ajiya ta cika)', 5000);
   else toast('An ƙara ' + ok + ' a timeline');
   if (ok) {
     touch();
@@ -1701,7 +1759,7 @@ async function removeMedia(id) {
   await purgeBlobs([id]);
   await saveMedia();
   await saveProjects();
-  lib.sel = lib.sel.filter(x => x !== 'app_' + id);
+  lib.sel = lib.sel.filter(x => x.regId !== id);
   if (P.vidId === id) P.vidId = null;
   if (P.imgId === id) P.imgId = null;
   P.idx = -1;
@@ -1715,83 +1773,10 @@ async function removeMedia(id) {
 
 function openLibrary(at) {
   lib.insertAt = at == null ? null : at;
-  lib.folder = ALLF;
   lib.sel = [];
   $('#libTitle').textContent = at == null || !proj || at >= proj.scenes.length ? 'Ƙara a ƙarshe' : at === 0 ? 'Ƙara a farko' : 'Ƙara a scene ' + (at + 1);
   renderLib();
   show('library');
-  autoScan();
-}
-
-const canDir = () => typeof window.showDirectoryPicker === 'function';
-async function loadDirs() {
-  try {
-    lib.dirs = (await DB.get('meta:dirs')) || [];
-  } catch (e) {
-    lib.dirs = [];
-  }
-  renderDirs();
-}
-function renderDirs() {
-  $('#pickLink').classList.toggle('hidden', !canDir());
-  $('#dirRow').innerHTML = lib.dirs.map(d =>
-    '<button class="chip dir" data-dir="' + d.id + '"><i class="fa-solid fa-link"></i> ' + esc(d.name) + ' <i class="fa-solid fa-rotate"></i></button>' +
-    '<button class="chip dirx" data-dirx="' + d.id + '" aria-label="Cire"><i class="fa-solid fa-xmark"></i></button>').join('');
-}
-async function scanDirHandle(d, silent) {
-  let perm = 'denied';
-  try {
-    perm = await d.handle.queryPermission({ mode: 'read' });
-    if (perm !== 'granted' && !silent) perm = await d.handle.requestPermission({ mode: 'read' });
-  } catch (e) {}
-  if (perm !== 'granted') {
-    if (!silent) toast('Ba a ba da izini ba');
-    return;
-  }
-  if (!silent) busy('Ana neman bidiyo da hotuna...');
-  lib.items = lib.items.filter(i => i.dirId !== d.id);
-  let n = 0;
-  const walk = async (h, path) => {
-    for await (const [name, eh] of h.entries()) {
-      if (eh.kind === 'file') {
-        const ext = extOf(name);
-        const type = VEXT.has(ext) ? 'video' : IEXT.has(ext) ? 'image' : null;
-        if (!type) continue;
-        try {
-          const f = await eh.getFile();
-          lib.items.push({ id: uid(), key: keyOf(f), name: f.name, type, folder: path, file: f, mod: f.lastModified, size: f.size, dirId: d.id });
-          n++;
-          if (!silent && n % 25 === 0) {
-            $('#busyText').textContent = 'An samu ' + n + '...';
-            await sleep(0);
-          }
-        } catch (e) {}
-      } else if (name[0] !== '.') await walk(eh, path + '/' + name);
-    }
-  };
-  try {
-    await walk(d.handle, d.name);
-  } catch (e) {}
-  d.scanned = true;
-  if (!silent) unbusy();
-  renderLib();
-}
-async function autoScan() {
-  for (const d of lib.dirs) {
-    if (!d.scanned) await scanDirHandle(d, true);
-  }
-}
-async function linkFolder() {
-  try {
-    const h = await window.showDirectoryPicker({ mode: 'read' });
-    const d = { id: uid(), name: h.name, handle: h };
-    lib.dirs.push(d);
-    await DB.put('meta:dirs', lib.dirs.map(x => ({ id: x.id, name: x.name, handle: x.handle })));
-    renderDirs();
-    await scanDirHandle(d, false);
-  } catch (e) {
-    if (e && e.name !== 'AbortError') toast('Ba a iya buɗe folder ba');
-  }
 }
 
 const SQ = 1;
@@ -2044,6 +2029,99 @@ async function replaceVoice(s, blob, dur) {
   }
 }
 
+function micConstraints(deviceId) {
+  const a = { echoCancellation: true, noiseSuppression: true, autoGainControl: false, channelCount: { ideal: 1 }, voiceIsolation: true };
+  if (deviceId) a.deviceId = { exact: deviceId };
+  return { audio: a };
+}
+async function openMic() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    toast('Wannan browser ba ya iya rikodin murya. Yi amfani da Chrome ta HTTPS.');
+    return null;
+  }
+  let stream = null;
+  if (settings.micId) {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia(micConstraints(settings.micId));
+    } catch (e) {
+      if (e && e.name === 'NotAllowedError') {
+        toast('Ba a ba da izinin makirufo ba');
+        return null;
+      }
+      settings.micId = '';
+      saveJSON(KEY_SET, settings);
+      toast('Makirufon da ka zaɓa ba a same shi ba. Ana amfani da makirufo na asali.', 4200);
+    }
+  }
+  if (!stream) {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia(micConstraints(''));
+    } catch (e) {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (e2) {
+        toast(e2 && e2.name === 'NotFoundError' ? 'Ba a samu makirufo ba. Haɗa makirufo ka sake gwadawa.' : 'Ba a ba da izinin makirufo ba');
+        return null;
+      }
+    }
+  }
+  refreshMics();
+  const t = stream.getAudioTracks()[0];
+  if (t && t.label) toast('Makirufo: ' + t.label, 2200);
+  return stream;
+}
+async function refreshMics() {
+  const sel = $('#selMic');
+  if (!sel || !navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+  let list = [];
+  try {
+    list = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audioinput' && d.deviceId !== 'communications');
+  } catch (e) {
+    return;
+  }
+  const seen = new Set();
+  let n = 0;
+  let h = '<option value="">Makirufo na asali na na\'ura</option>';
+  list.forEach(d => {
+    if (d.deviceId === 'default' || seen.has(d.groupId + d.label)) return;
+    seen.add(d.groupId + d.label);
+    n++;
+    h += '<option value="' + esc(d.deviceId) + '">' + esc(d.label || 'Makirufo ' + n) + '</option>';
+  });
+  sel.innerHTML = h;
+  if (settings.micId && !Array.from(sel.options).some(o => o.value === settings.micId)) {
+    settings.micId = '';
+    saveJSON(KEY_SET, settings);
+  }
+  sel.value = settings.micId;
+}
+function setupMicPicker() {
+  const btn = $('#btnRec');
+  if (!btn || $('#selMic')) return;
+  btn.insertAdjacentHTML('afterend',
+    '<label class="fld"><span><i class="fa-solid fa-plug"></i> Makirufo (na ciki, na waya, Bluetooth ko USB)</span>' +
+    '<span class="row"><select id="selMic"></select><button id="btnMicRef" class="btn slim" type="button" aria-label="Sabunta jerin"><i class="fa-solid fa-rotate"></i></button></span></label>');
+  $('#selMic').addEventListener('change', e => {
+    settings.micId = e.target.value;
+    saveJSON(KEY_SET, settings);
+    toast(settings.micId ? 'An zaɓi makirufo' : 'An dawo da makirufo na asali');
+  });
+  $('#btnMicRef').onclick = async () => {
+    try {
+      const st = await navigator.mediaDevices.getUserMedia({ audio: true });
+      st.getTracks().forEach(t => t.stop());
+    } catch (e) {
+      toast('Ba a ba da izinin makirufo ba');
+    }
+    await refreshMics();
+    toast('An sabunta jerin makirufo');
+  };
+  if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+    navigator.mediaDevices.addEventListener('devicechange', refreshMics);
+  }
+  refreshMics();
+}
+
 const Rec = { cancel: false, pending: null, abort: null, url: '' };
 
 async function recordFlow() {
@@ -2053,17 +2131,20 @@ async function recordFlow() {
     return toast('Wannan browser ba ya iya rikodin murya. Yi amfani da Chrome ta HTTPS.');
   }
   P.pause();
-  let stream;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false, channelCount: 1, voiceIsolation: true }
-    });
-  } catch (e) {
-    return toast('Ba a ba da izinin makirufo ba');
-  }
+  const stream = await openMic();
+  if (!stream) return;
   Rec.cancel = false;
   Rec.abort = null;
   const idx = selIdx;
+  const micTrack = stream.getAudioTracks()[0];
+  if (micTrack) {
+    micTrack.onended = () => {
+      if (Rec.abort) {
+        toast('An cire makirufo. An ajiye abin da aka yi rikodi.');
+        Rec.abort();
+      } else Rec.cancel = true;
+    };
+  }
   const AC = window.AudioContext || window.webkitAudioContext;
   const C = new AC();
   try {
@@ -2107,24 +2188,15 @@ async function recordFlow() {
     for (let i = 0; i < buf.length; i++) q += buf[i] * buf[i];
     return Math.sqrt(q / buf.length);
   };
-  let recog = null;
-  let transcript = '';
   let mr = null;
   let gateTimer = 0;
   let clockTimer = 0;
   let recording = false;
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 
   const cleanup = () => {
     recording = false;
     clearInterval(gateTimer);
     clearInterval(clockTimer);
-    if (recog) {
-      try {
-        recog.onend = null;
-        recog.stop();
-      } catch (e) {}
-    }
     stream.getTracks().forEach(t => t.stop());
     try {
       C.close();
@@ -2185,30 +2257,6 @@ async function recordFlow() {
     if (e.data && e.data.size) chunks.push(e.data);
   };
 
-  if (settings.autoCap && SR) {
-    try {
-      recog = new SR();
-      recog.lang = settings.lang;
-      recog.continuous = true;
-      recog.interimResults = false;
-      recog.onresult = e => {
-        for (let k = e.resultIndex; k < e.results.length; k++) {
-          if (e.results[k].isFinal) transcript += e.results[k][0].transcript.trim() + ' ';
-        }
-      };
-      recog.onend = () => {
-        if (recording) {
-          try {
-            recog.start();
-          } catch (e) {}
-        }
-      };
-      recog.start();
-    } catch (e) {
-      recog = null;
-    }
-  }
-
   P.recMode = true;
   A.init();
   await A.resume();
@@ -2264,11 +2312,11 @@ async function recordFlow() {
   const out = await processVoice(new Blob(chunks, { type: mime || 'audio/webm' }), elapsed);
   unbusy();
   if (!out.dur || out.dur < 0.2) return toast('Rikodin ya yi gajarta ko babu magana a ciki');
-  Rec.pending = { blob: out.blob, dur: out.dur, idx, transcript: transcript.trim() };
+  Rec.pending = { blob: out.blob, dur: out.dur, idx };
   if (Rec.url) URL.revokeObjectURL(Rec.url);
   Rec.url = URL.createObjectURL(out.blob);
   $('#revAudio').src = Rec.url;
-  $('#revInfo').textContent = 'Tsawo: ' + fmt1(out.dur) + (Rec.pending.transcript ? ' · Rubutu da aka ji: ' + Rec.pending.transcript : '');
+  $('#revInfo').textContent = 'Tsawo: ' + fmt1(out.dur);
   openModal('#mReview');
 }
 
@@ -2301,9 +2349,8 @@ async function saveVoice() {
   busy('Ana ajiye murya...');
   try {
     await replaceVoice(s, r.blob, r.dur);
-    s.muteOrig = true;
     s.voRate = 1;
-    if (r.transcript && !(s.text || '').trim()) s.text = r.transcript;
+    s.caps = null;
     selIdx = r.idx;
     const longer = r.dur > clipDur(s) + 0.1;
     if (longer) fitToVoice(true);
@@ -2314,8 +2361,9 @@ async function saveVoice() {
     renderTimeline();
     syncPanel();
     unbusy();
-    toast(longer ? 'An daidaita scene da tsawon murya. An kashe sautin asali.' : 'An saka murya a scene ' + (r.idx + 1) + '. An kashe sautin asali.');
+    toast(longer ? 'An daidaita scene da tsawon murya.' : 'An saka murya a scene ' + (r.idx + 1) + '.');
     await P.seek(P.lay[r.idx].start + 0.01);
+    if (settings.autoCap) setTimeout(() => transcribeScene(r.idx, 'vo'), 250);
   } catch (e) {
     unbusy();
     toast('Ba a iya ajiye murya ba, ajiya ta cika');
@@ -2365,82 +2413,256 @@ async function voiceClean() {
   unbusy();
 }
 
-async function autoCaption() {
-  const s = curScene();
-  if (!s) return toast('Zaɓi scene tukuna');
-  const source = $('#capSrc').value;
-  settings.capSrc = source;
-  saveJSON(KEY_SET, settings);
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const m = /Chrome\/(\d+)/.exec(navigator.userAgent);
-  if (!SR || !m || parseInt(m[1], 10) < 139) {
-    return toast('Rubutu daga fayil yana buƙatar Chrome sabo (version 139 ko sama). A rikodi zaka iya kunna “Rubuta abin da ake faɗi yayin rikodi”.', 6000);
+const ASR_SRC = [
+  "import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';",
+  "env.allowLocalModels = false;",
+  "env.useBrowserCache = true;",
+  "let pipe = null;",
+  "let name = '';",
+  "self.onmessage = async e => {",
+  "  const m = e.data;",
+  "  try {",
+  "    if (!pipe || name !== m.model) {",
+  "      pipe = await pipeline('automatic-speech-recognition', 'Xenova/whisper-' + m.model, { progress_callback: p => self.postMessage({ type: 'progress', p }) });",
+  "      name = m.model;",
+  "    }",
+  "    self.postMessage({ type: 'status', text: 'run' });",
+  "    const out = await pipe(m.audio, { language: m.language || undefined, task: 'transcribe', chunk_length_s: 30, stride_length_s: 5, return_timestamps: true });",
+  "    self.postMessage({ type: 'done', out });",
+  "  } catch (err) {",
+  "    self.postMessage({ type: 'error', message: String((err && err.message) || err) });",
+  "  }",
+  "};"
+].join('\n');
+const WLANG = { en: 'english', ha: 'hausa', yo: 'yoruba', sw: 'swahili', fr: 'french', ar: 'arabic', es: 'spanish', pt: 'portuguese', de: 'german', hi: 'hindi', zh: 'chinese', tr: 'turkish', ru: 'russian' };
+const ASR = { worker: null, reject: null };
+let asrCancel = false;
+
+function asrRun(audio, model, language, onMsg) {
+  return new Promise((resolve, reject) => {
+    if (!ASR.worker) {
+      const url = URL.createObjectURL(new Blob([ASR_SRC], { type: 'text/javascript' }));
+      ASR.worker = new Worker(url, { type: 'module' });
+    }
+    const w = ASR.worker;
+    ASR.reject = reject;
+    w.onmessage = e => {
+      const m = e.data;
+      if (m.type === 'done') resolve(m.out);
+      else if (m.type === 'error') reject(new Error(m.message));
+      else onMsg(m);
+    };
+    w.onerror = e => reject(new Error(e.message || 'worker'));
+    w.postMessage({ model, language, audio }, [audio.buffer]);
+  });
+}
+function asrAbort() {
+  asrCancel = true;
+  if (ASR.worker) {
+    ASR.worker.terminate();
+    ASR.worker = null;
   }
-  if (source === 'vo' && !s.voId) return toast('Wannan scene ba ta da murya da aka yi rikodi');
-  if (source === 'orig' && s.type !== 'video') return toast('Hoto ba shi da sautin asali');
-  const idx = selIdx;
+  if (ASR.reject) ASR.reject(new Error('cancel'));
+  P.pause();
+}
+
+function resample16(d, rate) {
+  if (rate === 16000) return d;
+  const ratio = rate / 16000;
+  const m = Math.floor(d.length / ratio);
+  const out = new Float32Array(m);
+  for (let i = 0; i < m; i++) {
+    const pp = i * ratio;
+    const j = Math.floor(pp);
+    const f = pp - j;
+    out[i] = d[j] * (1 - f) + (d[j + 1] !== undefined ? d[j + 1] : d[j]) * f;
+  }
+  return out;
+}
+async function decode16k(blob) {
+  const ab = await blob.arrayBuffer();
+  const Off = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  let buf;
+  try {
+    buf = await new Off(1, 1, 16000).decodeAudioData(ab.slice(0));
+  } catch (e) {
+    const C = window.AudioContext || window.webkitAudioContext;
+    const c = new C();
+    try {
+      buf = await c.decodeAudioData(ab.slice(0));
+    } finally {
+      try {
+        c.close();
+      } catch (e2) {}
+    }
+  }
+  const n = buf.length;
+  const d = new Float32Array(n);
+  for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+    const x = buf.getChannelData(ch);
+    for (let i = 0; i < n; i++) d[i] += x[i] / buf.numberOfChannels;
+  }
+  return resample16(d, buf.sampleRate);
+}
+
+async function captureScene(idx) {
   A.init();
   await A.resume();
-  const dest = A.ctx.createMediaStreamDestination();
-  const node = source === 'vo' ? A.gVo : A.gV;
-  node.connect(dest);
-  const track = dest.stream.getAudioTracks()[0];
-  let text = '';
-  const rec = new SR();
-  rec.lang = settings.lang;
-  rec.continuous = true;
-  rec.interimResults = false;
-  rec.onresult = e => {
-    for (let k = e.resultIndex; k < e.results.length; k++) {
-      if (e.results[k].isFinal) text += e.results[k][0].transcript.trim() + ' ';
-    }
-  };
-  let cancelled = false;
-  busy('Ana rubuta abin da ake faɗi... (yana wasa a hankali)', { cancel: true });
-  const stopAll = () => {
-    cancelled = true;
-    P.pause();
-  };
-  $('#busyCancel').onclick = stopAll;
-  $('#busyX').onclick = stopAll;
-  try {
-    rec.start(track);
-  } catch (e) {
-    node.disconnect(dest);
-    unbusy();
-    return toast('Browser ɗinka bai goyi bayan rubutu daga fayil ba');
-  }
-  P.stt = source;
+  const rate = A.ctx.sampleRate;
+  const sp = A.ctx.createScriptProcessor(4096, 1, 1);
+  const z = A.ctx.createGain();
+  z.gain.value = 0;
+  const parts = [];
+  sp.onaudioprocess = e => parts.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+  A.gV.connect(sp);
+  sp.connect(z);
+  z.connect(A.ctx.destination);
+  P.stt = 'orig';
   P.stopAt = null;
   await P.seek(P.lay[idx].start);
   P.stopAt = P.lay[idx].start + P.lay[idx].dur;
   P.applyGains();
   await P.play();
-  while (P.playing && !cancelled) {
-    busyProgress((P.t - P.lay[idx].start) / Math.max(0.1, P.lay[idx].dur));
+  while (P.playing && !asrCancel) {
+    busyProgress((P.t - P.lay[idx].start) / Math.max(0.1, P.lay[idx].dur), 'Ana karanta sautin bidiyo (yana wasa a hankali)...');
     await sleep(200);
   }
-  await sleep(1500);
-  try {
-    rec.stop();
-  } catch (e) {}
-  await sleep(600);
-  node.disconnect(dest);
+  P.pause();
   P.stt = null;
   P.stopAt = null;
   P.applyGains();
-  $('#busyCancel').onclick = cancelExport;
-  $('#busyX').onclick = cancelExport;
+  try {
+    A.gV.disconnect(sp);
+    sp.disconnect();
+    z.disconnect();
+  } catch (e) {}
+  let n = 0;
+  parts.forEach(x => (n += x.length));
+  const all = new Float32Array(n);
+  let o = 0;
+  parts.forEach(x => {
+    all.set(x, o);
+    o += x.length;
+  });
+  return resample16(all, rate);
+}
+
+const cleanCap = t => t.replace(/\[[^\]]*\]|\([^)]*\)|♪[^♪]*♪|♪/g, ' ').replace(/\s+/g, ' ').trim();
+
+async function transcribeScene(idx, source) {
+  const s = proj && proj.scenes[idx];
+  if (!s) return toast('Zaɓi scene tukuna');
+  if (source === 'vo' && !s.voId) return toast('Wannan scene ba ta da murya da aka yi rikodi');
+  if (source === 'orig' && s.type !== 'video') return toast('Hoto ba shi da sautin asali');
+  if (typeof Worker === 'undefined') return toast('Wannan browser ba ya goyon bayan wannan aikin');
+  asrCancel = false;
+  busy('Ana shirya rubutu...', { bar: true, cancel: true });
+  $('#busyCancel').onclick = asrAbort;
+  $('#busyX').onclick = asrAbort;
+  const restore = () => {
+    $('#busyCancel').onclick = cancelExport;
+    $('#busyX').onclick = cancelExport;
+    unbusy();
+  };
+  try {
+    busyProgress(0, 'Ana karanta sauti...');
+    let audio;
+    let toLocal;
+    if (source === 'vo') {
+      audio = await decode16k(await DB.get(s.voId));
+      toLocal = t => t / (s.voRate || 1);
+    } else {
+      const f = await DB.get(s.mediaId);
+      audio = null;
+      if (f && f.size <= 200 * 1048576) {
+        try {
+          const all = await decode16k(f);
+          audio = all.slice(Math.floor(s.trimIn * 16000), Math.ceil(s.trimOut * 16000));
+          toLocal = t => t / s.speed;
+        } catch (e) {
+          audio = null;
+        }
+      }
+      if (!audio) {
+        audio = await captureScene(idx);
+        toLocal = t => t;
+      }
+    }
+    if (asrCancel) throw new Error('cancel');
+    let q = 0;
+    for (let i = 0; i < audio.length; i += 8) q += audio[i] * audio[i];
+    if (!audio.length || Math.sqrt(q / Math.max(1, audio.length / 8)) < 0.002) throw new Error('nospeech');
+    const lang = settings.lang === 'auto' ? undefined : WLANG[settings.lang.slice(0, 2)];
+    const files = {};
+    busyProgress(0, 'Ana sauke samfurin rubutu (sau ɗaya kawai, sai ya zauna a na\'ura)...');
+    const out = await asrRun(audio.slice(), settings.asrModel, lang, m => {
+      if (m.type === 'progress' && m.p && typeof m.p.progress === 'number' && m.p.file) {
+        files[m.p.file] = m.p.progress;
+        const v = Object.values(files);
+        busyProgress(v.reduce((a, b) => a + b, 0) / v.length / 100);
+      } else if (m.type === 'status') {
+        busyProgress(0.97, 'Ana rubuta abin da ake faɗi... (jira kaɗan)');
+      }
+    });
+    if (asrCancel) throw new Error('cancel');
+    const dur = sceneDur(s);
+    const caps = [];
+    (out.chunks || []).forEach((c, i, arr) => {
+      const t0 = c.timestamp && c.timestamp[0] != null ? c.timestamp[0] : 0;
+      const t1 = c.timestamp && c.timestamp[1] != null ? c.timestamp[1] : t0 + 3;
+      const text = cleanCap(c.text || '');
+      if (!text) return;
+      if (caps.length && caps[caps.length - 1].text === text) return;
+      caps.push({ a: clamp(toLocal(t0), 0, dur), b: clamp(toLocal(t1), 0, dur), text });
+    });
+    if (!caps.length && out.text && cleanCap(out.text)) caps.push({ a: 0, b: dur, text: cleanCap(out.text) });
+    if (!caps.length) throw new Error('nospeech');
+    for (let i = 0; i < caps.length; i++) {
+      if (caps[i].b <= caps[i].a) caps[i].b = i + 1 < caps.length ? caps[i + 1].a : dur;
+    }
+    s.caps = caps;
+    s.text = caps.map(c => c.text).join(' ');
+    s.capsFor = s.text;
+    restore();
+    touch();
+    syncPanel();
+    renderTimeline();
+    P.render();
+    toast('An rubuta rubutu a scene ' + (idx + 1));
+  } catch (e) {
+    restore();
+    P.stt = null;
+    P.stopAt = null;
+    P.applyGains();
+    const m = e && e.message;
+    if (m === 'cancel') toast('An soke');
+    else if (m === 'nospeech') toast('Ba a ji magana ba. Duba harshen da ka zaɓa da ƙarfin sauti.');
+    else toast('Ba a iya rubuta ba. Ana buƙatar intanet a karon farko don sauke samfurin. (' + (m || 'error') + ')', 6000);
+  }
+}
+
+async function boostVoice(all) {
+  if (!proj) return;
+  const targets = all ? proj.scenes.filter(x => x.voId) : [curScene()].filter(x => x && x.voId);
+  if (!targets.length) return toast('Babu murya da za a ƙara');
+  busy('Ana ƙara ƙarfin murya...', { bar: true });
+  let k = 0;
+  for (const s of targets) {
+    try {
+      const { d, rate } = await decodeMono(await DB.get(s.voId));
+      const out = new Int16Array(d.length);
+      const th = Math.tanh(1.3);
+      for (let i = 0; i < d.length; i++) out[i] = Math.round(Math.tanh(d[i] * 2.2 * 1.3) / th * 0.98 * 32767);
+      await replaceVoice(s, wavBlob(out, rate), d.length / rate);
+    } catch (e) {}
+    k++;
+    busyProgress(k / targets.length);
+  }
   unbusy();
-  if (cancelled) return toast('An soke');
-  text = text.trim();
-  if (!text) return toast('Ba a ji magana ba. Duba harshen da ka zaɓa da ƙarfin sauti.');
-  s.text = text;
-  $('#capText').value = text;
   touch();
-  renderTimeline();
-  P.render();
-  toast('An rubuta rubutu a scene ' + (idx + 1));
+  await afterEdit();
+  syncPanel();
+  toast(all ? 'An ƙara murya a duka scenes' : 'An ƙara ƙarfin murya');
 }
 
 function pickMime() {
@@ -2811,7 +3033,7 @@ async function deleteVoice() {
   s.voId = null;
   s.voDur = 0;
   s.voRate = 1;
-  s.muteOrig = false;
+  s.caps = null;
   if (P.voId === old) P.voId = null;
   voEl.pause();
   await purgeBlobs([old]);
@@ -2830,6 +3052,8 @@ async function splitScene() {
   const b = JSON.parse(JSON.stringify(s));
   b.id = uid();
   b.text = '';
+  b.caps = null;
+  s.caps = null;
   b.overlays = [];
   b.trans = 'none';
   if (s.type === 'video') {
@@ -2907,6 +3131,7 @@ function setPanelTab(name) {
 }
 
 function bind() {
+  setupMicPicker();
   LANGS.forEach(([c, n]) => $('#selLang').insertAdjacentHTML('beforeend', '<option value="' + c + '">' + n + '</option>'));
 
   $$('[data-close]').forEach(b => b.addEventListener('click', () => closeModal('#' + b.dataset.close)));
@@ -2953,59 +3178,27 @@ function bind() {
   };
   $('#pickAll').onclick = () => $('#fAll').click();
   $('#pickDir').onclick = () => $('#fDir').click();
-  $('#pickLink').onclick = linkFolder;
   ['#fAll', '#fDir'].forEach(id => {
     $(id).addEventListener('change', e => {
-      addLibFiles(e.target.files);
+      addPicked(e.target.files);
       e.target.value = '';
     });
-  });
-  $('#dirRow').addEventListener('click', async e => {
-    const x = e.target.closest('[data-dirx]');
-    if (x) {
-      lib.dirs = lib.dirs.filter(d => d.id !== x.dataset.dirx);
-      lib.items = lib.items.filter(i => i.dirId !== x.dataset.dirx);
-      await DB.put('meta:dirs', lib.dirs.map(d => ({ id: d.id, name: d.name, handle: d.handle })));
-      renderDirs();
-      renderLib();
-      return;
-    }
-    const c = e.target.closest('[data-dir]');
-    if (c) {
-      const d = lib.dirs.find(z => z.id === c.dataset.dir);
-      if (d) scanDirHandle(d, false);
-    }
-  });
-  $('#fchips').addEventListener('click', e => {
-    const c = e.target.closest('[data-folder]');
-    if (!c) return;
-    lib.folder = c.dataset.folder;
-    renderLib();
-  });
-  $('#tchips').addEventListener('click', e => {
-    const c = e.target.closest('.chip');
-    if (!c) return;
-    lib.filter = c.dataset.f;
-    $$('#tchips .chip').forEach(x => x.classList.toggle('on', x === c));
-    renderLib();
   });
   $('#libGrid').addEventListener('click', e => {
     const rm = e.target.closest('[data-rm]');
     if (rm) return removeMedia(rm.dataset.rm);
     const it = e.target.closest('.it');
-    if (it) toggleSel(it.dataset.id);
+    if (it) toggleReg(it.dataset.reg);
   });
   $('#trayItems').addEventListener('click', e => {
     const t = e.target.closest('.ti');
-    if (t) toggleSel(t.dataset.id);
+    if (!t) return;
+    lib.sel = lib.sel.filter(x => x.id !== t.dataset.id);
+    refreshBadges();
+    renderTray(true);
   });
-  $('#libAll').onclick = () => {
-    const cur = viewItems();
-    const allSel = cur.length > 0 && cur.every(i => lib.sel.includes(i.id));
-    if (allSel) lib.sel = lib.sel.filter(id => !cur.some(i => i.id === id));
-    else cur.sort((a, b) => (b.mod || 0) - (a.mod || 0)).forEach(i => {
-      if (!lib.sel.includes(i.id)) lib.sel.push(i.id);
-    });
+  $('#trayClear').onclick = () => {
+    lib.sel = [];
     refreshBadges();
     renderTray();
   };
@@ -3126,7 +3319,6 @@ function bind() {
   bindSwitch('#swAutoCap', on => {
     settings.autoCap = on;
     saveJSON(KEY_SET, settings);
-    if (on && !(window.SpeechRecognition || window.webkitSpeechRecognition)) toast('Wannan browser ba ya goyon bayan rubutu kai tsaye');
   });
   $('#micGain').addEventListener('input', e => {
     settings.micGain = parseFloat(e.target.value);
@@ -3146,33 +3338,36 @@ function bind() {
     saveJSON(KEY_SET, settings);
   });
   $('#voVol').addEventListener('input', e => {
-    const s = curScene();
-    if (!s) return;
-    s.voVol = e.target.value / 100;
+    if (!proj) return;
+    proj.aud.voVol = e.target.value / 100;
     $('#voVolV').textContent = e.target.value + '%';
     P.applyGains();
     touch();
   });
   $('#origVol').addEventListener('input', e => {
-    const s = curScene();
-    if (!s) return;
-    s.origVol = e.target.value / 100;
-    if (s.origVol > 0 && s.muteOrig) {
-      s.muteOrig = false;
-      setSwitch('#swOrig', true);
-      renderTimeline();
-    }
+    if (!proj) return;
+    proj.aud.origVol = e.target.value / 100;
     $('#origVolV').textContent = e.target.value + '%';
     P.applyGains();
     touch();
   });
   bindSwitch('#swOrig', on => {
-    const s = curScene();
-    if (!s) return;
-    s.muteOrig = !on;
+    if (!proj) return;
+    proj.aud.autoMute = on;
     P.applyGains();
-    renderTimeline();
     touch();
+  });
+  $('#btnVoBoost').onclick = () => boostVoice(false);
+  $('#btnVoBoostAll').onclick = () => boostVoice(true);
+  $('#selCapAnim').addEventListener('change', e => {
+    if (!proj) return;
+    proj.capAnim = e.target.value;
+    touch();
+    P.render();
+  });
+  $('#selAsr').addEventListener('change', e => {
+    settings.asrModel = e.target.value;
+    saveJSON(KEY_SET, settings);
   });
   $('#btnVoPlay').onclick = async () => {
     const s = curScene();
@@ -3181,7 +3376,7 @@ function bind() {
     if (!u) return;
     P.pause();
     const a = new Audio(u);
-    a.volume = clamp(s.voVol, 0, 1);
+    a.volume = 1;
     a.play().catch(() => {});
   };
   $('#btnVoDel').onclick = deleteVoice;
@@ -3211,12 +3406,13 @@ function bind() {
     const s = curScene();
     if (!s) return;
     s.text = '';
+    s.caps = null;
     $('#capText').value = '';
     touch();
     renderTimeline();
     P.render();
   };
-  $('#btnAutoCap').onclick = autoCaption;
+  $('#btnAutoCap').onclick = () => (selIdx >= 0 ? transcribeScene(selIdx, $('#capSrc').value) : toast('Zaɓi scene tukuna'));
 
   const trimChange = () => {
     const s = curScene();
@@ -3509,7 +3705,6 @@ async function init() {
   bind();
   renderHome();
   loadLogo();
-  loadDirs();
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').then(() => navigator.serviceWorker.ready).then(() => {
@@ -3525,4 +3720,12 @@ async function init() {
   if (last && projects.some(p => p.id === last)) await openProject(last);
 }
 
-init(); 
+window.addEventListener('unhandledrejection', e => {
+  if (e && e.reason && e.reason.message === 'cancel') return;
+  toast('Wani abu bai yi daidai ba, an ci gaba. Sake gwadawa.');
+});
+window.addEventListener('error', () => {
+  toast('Wani abu bai yi daidai ba, an ci gaba. Sake gwadawa.');
+});
+
+init();
