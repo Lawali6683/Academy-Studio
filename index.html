@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="ha">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#0b0f1a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Bidiyo Studio</title>
+<link rel="icon" href="https://i.imgur.com/oyqM5oF.png">
+<link rel="apple-touch-icon" href="https://i.imgur.com/oyqM5oF.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<link rel="stylesheet" href="index.css">
+</head>
+<body>
+
+<div id="app">
+
+<section id="home" class="screen active">
+  <header class="top">
+    <div class="brand">
+      <img class="logo-img brand-logo" src="https://i.imgur.com/oyqM5oF.png" alt="">
+      <div>
+        <h1>Bidiyo Studio</h1>
+        <p>Bidiyo, murya, rubutu da kiɗa a wuri ɗaya</p>
+      </div>
+    </div>
+    <span id="net" class="net on"><i class="fa-solid fa-wifi"></i><em>Online</em></span>
+  </header>
+  <main class="home-main">
+    <button id="btnNew" class="cta big-cta"><i class="fa-solid fa-circle-plus"></i><span>Sabon Project</span></button>
+    <div class="inst-row">
+      <button id="btnInstall" class="btn"><i class="fa-solid fa-download"></i> Sauke app a wayarka</button>
+      <span id="offState" class="off-state"></span>
+    </div>
+    <div class="sto" id="stoBox">
+      <div class="sto-top"><span><i class="fa-solid fa-hard-drive"></i> Ajiyar app</span><b id="stoText">...</b></div>
+      <div class="bar"><i id="stoBar"></i></div>
+    </div>
+    <h2 class="sec"><i class="fa-solid fa-folder-open"></i> Project ɗinka</h2>
+    <div id="projList" class="plist"></div>
+    <div id="projEmpty" class="empty">
+      <i class="fa-solid fa-clapperboard"></i>
+      <p>Babu project tukuna.<br>Danna “Sabon Project” don farawa.</p>
+    </div>
+  </main>
+</section>
+
+<section id="library" class="screen">
+  <header class="top">
+    <button id="libBack" class="icon-btn" aria-label="Rufe"><i class="fa-solid fa-xmark"></i></button>
+    <div class="title"><b id="libTitle">Zaɓi bidiyo ko hoto</b><small id="libCrumb">Zaɓi da yawa, babu iyaka</small></div>
+    <button id="libAll" class="btn slim"><i class="fa-solid fa-list-check"></i> Duka</button>
+  </header>
+  <div class="pick-row">
+    <button id="pickAll" class="btn prim"><i class="fa-solid fa-photo-film"></i> Buɗe gallery</button>
+    <button id="pickDir" class="btn"><i class="fa-solid fa-folder-tree"></i> Folder</button>
+    <button id="pickLink" class="btn hidden"><i class="fa-solid fa-link"></i> Haɗa folder</button>
+  </div>
+  <div class="chips" id="dirRow"></div>
+  <div class="chips" id="fchips"></div>
+  <div class="chips" id="tchips">
+    <button class="chip on" data-f="all"><i class="fa-solid fa-layer-group"></i> Duka</button>
+    <button class="chip" data-f="video"><i class="fa-solid fa-film"></i> Bidiyo</button>
+    <button class="chip" data-f="image"><i class="fa-solid fa-image"></i> Hotuna</button>
+  </div>
+  <div id="libGrid" class="grid"></div>
+  <footer class="tray">
+    <div id="trayItems" class="tray-items"><span class="tray-hint">Danna fayil don zaɓa, za a lissafa su 1, 2, 3…</span></div>
+    <button id="btnAdd" class="cta" disabled><i class="fa-solid fa-check"></i><span>Ƙara</span><b id="addCount">0</b></button>
+  </footer>
+</section>
+
+<section id="editor" class="screen">
+  <header class="top">
+    <button id="edBack" class="icon-btn" aria-label="Gida"><i class="fa-solid fa-house"></i></button>
+    <input id="edName" class="name-input" maxlength="60" aria-label="Sunan project">
+    <span id="saveState" class="save"><i class="fa-solid fa-circle-check"></i></span>
+    <button id="btnExport" class="cta"><i class="fa-solid fa-wand-magic-sparkles"></i><span>Hada</span></button>
+  </header>
+  <div class="ed-body">
+    <div class="stage-wrap">
+      <div class="stage" id="stage">
+        <canvas id="cv" width="480" height="854"></canvas>
+        <button id="btnStageFull" class="stage-full" aria-label="Full screen"><i class="fa-solid fa-expand"></i></button>
+        <div id="stageEmpty" class="stage-empty">
+          <i class="fa-solid fa-photo-film"></i>
+          <p>Ƙara bidiyo ko hoto don farawa</p>
+          <button id="emptyAdd" class="cta"><i class="fa-solid fa-plus"></i><span>Ƙara</span></button>
+        </div>
+      </div>
+      <div class="transport">
+        <button id="btnPlay" class="round" aria-label="Kunna"><i class="fa-solid fa-play"></i></button>
+        <span id="tNow" class="tm">0:00</span>
+        <input id="scrub" type="range" min="0" max="1000" value="0" aria-label="Wuri">
+        <span id="tTotal" class="tm">0:00</span>
+      </div>
+    </div>
+    <div class="side">
+      <div class="tl" id="tl"><div class="tl-inner" id="tlInner"></div></div>
+      <nav class="tabs" id="tabs">
+        <button data-tab="voice"><i class="fa-solid fa-microphone"></i><span>Murya</span></button>
+        <button data-tab="text"><i class="fa-solid fa-closed-captioning"></i><span>Rubutu</span></button>
+        <button data-tab="edit"><i class="fa-solid fa-scissors"></i><span>Gyara</span></button>
+        <button data-tab="layers"><i class="fa-solid fa-layer-group"></i><span>Sama</span></button>
+        <button data-tab="style"><i class="fa-solid fa-wand-sparkles"></i><span>Salo</span></button>
+        <button data-tab="music"><i class="fa-solid fa-music"></i><span>Kiɗa</span></button>
+        <button data-tab="logo"><i class="fa-solid fa-stamp"></i><span>Logo</span></button>
+        <button data-tab="export"><i class="fa-solid fa-file-export"></i><span>Fitar</span></button>
+      </nav>
+      <div class="panel" id="panel">
+        <div class="panel-head"><b id="panelTitle"></b><button id="panelClose" class="x-btn" aria-label="Rufe"><i class="fa-solid fa-xmark"></i></button></div>
+
+        <div class="pn" data-panel="voice">
+          <button id="btnRec" class="big red"><i class="fa-solid fa-microphone"></i> Fara Rikodin Murya (3-2-1)</button>
+          <p id="voInfo" class="info"></p>
+          <label class="sl"><span><i class="fa-solid fa-microphone-lines"></i> Ƙarfin makirufo</span><input id="micGain" type="range" min="1" max="8" step="0.5" value="3"><b id="micGainV">3x</b></label>
+          <label class="fld"><span><i class="fa-solid fa-broom"></i> Tace hayaniya</span>
+            <select id="selNr"><option value="low">Kaɗan</option><option value="medium">Matsakaici</option><option value="high" selected>Sosai (muryar magana kawai)</option></select>
+          </label>
+          <div class="row between">
+            <span><i class="fa-solid fa-closed-captioning"></i> Rubuta abin da ake faɗi yayin rikodi</span>
+            <button id="swAutoCap" class="switch"><span></span></button>
+          </div>
+          <label class="sl"><span><i class="fa-solid fa-volume-high"></i> Ƙarfin muryar rikodi</span><input id="voVol" type="range" min="0" max="200" value="100"><b id="voVolV">100%</b></label>
+          <div class="row">
+            <button id="btnVoPlay" class="btn"><i class="fa-solid fa-headphones"></i> Saurara</button>
+            <button id="btnVoDel" class="btn danger"><i class="fa-solid fa-trash"></i> Goge murya</button>
+          </div>
+          <div id="voEdit" class="box hidden">
+            <b class="box-t"><i class="fa-solid fa-sliders"></i> Gyara murya</b>
+            <label class="sl"><span>Farawa</span><input id="voCutIn" type="range" min="0" max="10" step="0.05" value="0"><b id="voCutInV">0s</b></label>
+            <label class="sl"><span>Ƙarewa</span><input id="voCutOut" type="range" min="0" max="10" step="0.05" value="10"><b id="voCutOutV">0s</b></label>
+            <div class="row">
+              <button id="btnVoCut" class="btn"><i class="fa-solid fa-scissors"></i> Yanke</button>
+              <button id="btnVoClean" class="btn"><i class="fa-solid fa-broom"></i> Tsabtace sosai</button>
+            </div>
+          </div>
+          <div class="sep"></div>
+          <div class="row between">
+            <span><i class="fa-solid fa-volume-high"></i> Sautin bidiyo na asali</span>
+            <button id="swOrig" class="switch on"><span></span></button>
+          </div>
+          <label class="sl"><span>Ƙarfin sautin asali</span><input id="origVol" type="range" min="0" max="200" value="100"><b id="origVolV">100%</b></label>
+          <p class="hint">Idan ka bar sautin asali a kunne tare da muryarka, za a ji duka biyu.</p>
+        </div>
+
+        <div class="pn" data-panel="text">
+          <label class="fld"><span><i class="fa-solid fa-pen"></i> Rubutun wannan scene</span>
+            <textarea id="capText" rows="4" placeholder="Rubuta abin da ake faɗi a nan..."></textarea>
+          </label>
+          <div class="box">
+            <b class="box-t"><i class="fa-solid fa-wand-magic-sparkles"></i> Rubutu na atomatik</b>
+            <label class="fld"><span>Daga ina za a rubuta?</span>
+              <select id="capSrc"><option value="vo">Muryar da aka yi rikodi</option><option value="orig">Sautin bidiyo na asali</option></select>
+            </label>
+            <label class="fld"><span><i class="fa-solid fa-language"></i> Harshe</span><select id="selLang"></select></label>
+            <button id="btnAutoCap" class="big violet"><i class="fa-solid fa-closed-captioning"></i> Rubuta kai tsaye</button>
+            <p class="hint">Ana rubuta magana kawai, ba kiɗa ko hayaniya ba. Yana wasa a lokacin da scene yake, sai ya gama.</p>
+          </div>
+          <p class="hint">Rubutun yana fitowa a ƙasan bidiyo, ba a kan hoto ba. Layi ɗaya kawai a lokaci, yana canzawa zuwa na gaba ne kawai idan wani ya zo.</p>
+          <button id="btnCapClear" class="btn danger"><i class="fa-solid fa-eraser"></i> Goge rubutu</button>
+        </div>
+
+        <div class="pn" data-panel="edit">
+          <div id="trimBox">
+            <label class="sl"><span><i class="fa-solid fa-backward-step"></i> Farawa</span><input id="trimIn" type="range" min="0" max="10" step="0.05" value="0"><b id="trimInV">0s</b></label>
+            <label class="sl"><span><i class="fa-solid fa-forward-step"></i> Ƙarewa</span><input id="trimOut" type="range" min="0" max="10" step="0.05" value="10"><b id="trimOutV">0s</b></label>
+            <label class="fld"><span><i class="fa-solid fa-gauge-high"></i> Gudun bidiyo</span>
+              <select id="selSpeed">
+                <option value="0.5">0.5x</option><option value="0.75">0.75x</option><option value="1" selected>1x</option>
+                <option value="1.25">1.25x</option><option value="1.5">1.5x</option><option value="2">2x</option>
+              </select>
+            </label>
+          </div>
+          <div id="imgBox" class="hidden">
+            <label class="sl"><span><i class="fa-solid fa-hourglass-half"></i> Tsawon hoto</span><input id="imgDur" type="range" min="1" max="30" step="0.5" value="5"><b id="imgDurV">5s</b></label>
+          </div>
+          <button id="btnFit" class="btn"><i class="fa-solid fa-arrows-left-right-to-line"></i> Daidaita scene da murya</button>
+          <button id="btnSplit" class="btn"><i class="fa-solid fa-scissors"></i> Fasa scene a inda yake yanzu</button>
+          <div class="row">
+            <button id="btnAddBefore" class="btn"><i class="fa-solid fa-angles-left"></i> Ƙara kafin</button>
+            <button id="btnAddAfter" class="btn">Ƙara bayan <i class="fa-solid fa-angles-right"></i></button>
+          </div>
+          <div class="row">
+            <button id="btnLeft" class="btn"><i class="fa-solid fa-arrow-left"></i> Gaba</button>
+            <button id="btnRight" class="btn">Baya <i class="fa-solid fa-arrow-right"></i></button>
+            <button id="btnDelScene" class="btn danger"><i class="fa-solid fa-trash"></i> Goge</button>
+          </div>
+        </div>
+
+        <div class="pn" data-panel="layers">
+          <p class="hint">Ka ɗora hoto ko bidiyo a kan scene. Ja shi a kan allo don motsa shi, ka daidaita girmansa. Ba zai taɓa rufe rubutu ba.</p>
+          <div class="row">
+            <button id="btnOvImg" class="btn"><i class="fa-solid fa-image"></i> Ƙara hoto</button>
+            <button id="btnOvVid" class="btn"><i class="fa-solid fa-video"></i> Ƙara bidiyo</button>
+          </div>
+          <div id="ovList" class="ovlist"></div>
+          <div id="ovCtl" class="box hidden">
+            <label class="sl"><span><i class="fa-solid fa-up-right-and-down-left-from-center"></i> Girma</span><input id="ovSize" type="range" min="5" max="150" value="40"><b id="ovSizeV">40%</b></label>
+            <label class="sl"><span><i class="fa-solid fa-droplet"></i> Opacity</span><input id="ovOp" type="range" min="5" max="100" value="100"><b id="ovOpV">100%</b></label>
+            <div class="row">
+              <button id="btnOvCenter" class="btn"><i class="fa-solid fa-crosshairs"></i> Tsakiya</button>
+              <button id="btnOvDel" class="btn danger"><i class="fa-solid fa-xmark"></i> Cire</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="pn" data-panel="style">
+          <label class="fld"><span><i class="fa-solid fa-wand-sparkles"></i> Salon shigowar scene</span>
+            <select id="selTrans">
+              <option value="none">Babu</option><option value="fade">Fade</option><option value="zoom">Zoom</option>
+              <option value="slide">Zamiya ta gefe</option><option value="slideup">Zamiya ta sama</option>
+            </select>
+          </label>
+          <div class="row between">
+            <span><i class="fa-solid fa-magnifying-glass-plus"></i> Motsin hoto a hankali</span>
+            <button id="swMotion" class="switch"><span></span></button>
+          </div>
+          <button id="btnTransAll" class="btn"><i class="fa-solid fa-clone"></i> Saka wannan salo a duka scenes</button>
+          <label class="fld"><span><i class="fa-solid fa-crop-simple"></i> Yadda ake nuna bidiyo a allo</span>
+            <select id="selFit"><option value="fit">Cikakke, ba a yanke (tare da blur a gefe)</option><option value="fill">Cika allo gaba ɗaya (a yanke gefe)</option></select>
+          </label>
+        </div>
+
+        <div class="pn" data-panel="music">
+          <button id="btnMusic" class="big violet"><i class="fa-solid fa-music"></i> Ƙara Kiɗa</button>
+          <p id="musName" class="info"></p>
+          <div id="musBox" class="hidden">
+            <label class="sl"><span><i class="fa-solid fa-volume-low"></i> Ƙarfin kiɗa</span><input id="musVol" type="range" min="0" max="100" value="60"><b id="musVolV">60%</b></label>
+            <div class="row between">
+              <span><i class="fa-solid fa-microphone-lines-slash"></i> Kiɗa ya yi ƙasa idan ana magana</span>
+              <button id="swDuck" class="switch on"><span></span></button>
+            </div>
+            <p class="hint">Idan shiru ne kiɗa yana fitowa sosai, idan aka fara magana yana sauka ƙasa da kansa.</p>
+            <button id="btnMusDel" class="btn danger"><i class="fa-solid fa-trash"></i> Goge kiɗa</button>
+          </div>
+        </div>
+
+        <div class="pn" data-panel="logo">
+          <div class="row between">
+            <span><i class="fa-solid fa-eye"></i> Nuna logo a sama</span>
+            <button id="swLogoOn" class="switch on"><span></span></button>
+          </div>
+          <label class="sl"><span><i class="fa-solid fa-up-right-and-down-left-from-center"></i> Girman logo</span><input id="logoSize" type="range" min="4" max="45" value="13"><b id="logoSizeV">13%</b></label>
+          <div class="row between">
+            <span><i class="fa-solid fa-wand-sparkles"></i> Logo ya riƙa motsi</span>
+            <button id="swLogoAnim" class="switch on"><span></span></button>
+          </div>
+          <div class="row">
+            <button id="btnLogoPick" class="btn"><i class="fa-solid fa-image"></i> Saka logona</button>
+            <button id="btnLogoReset" class="btn"><i class="fa-solid fa-rotate-left"></i> Logon asali</button>
+          </div>
+          <button id="btnLogoPos" class="btn"><i class="fa-solid fa-up-down-left-right"></i> Mayar da wurinsa</button>
+          <p class="hint">Ka ja logo a kan allo don ajiye shi inda kake so.</p>
+          <div class="sep"></div>
+          <div class="row between">
+            <span><i class="fa-solid fa-stamp"></i> Logo a tsakiyar bidiyo</span>
+            <button id="swLogo" class="switch"><span></span></button>
+          </div>
+          <label class="sl"><span><i class="fa-solid fa-droplet"></i> Opacity</span><input id="logoOp" type="range" min="2" max="100" value="15"><b id="logoOpV">15%</b></label>
+        </div>
+
+        <div class="pn" data-panel="export">
+          <label class="fld"><span><i class="fa-solid fa-crop-simple"></i> Siffar allo</span>
+            <select id="selAspect"><option value="9:16">Tsaye 9:16 (waya)</option><option value="16:9">Kwance 16:9</option><option value="1:1">Murabba'i 1:1</option></select>
+          </label>
+          <label class="fld"><span><i class="fa-solid fa-display"></i> Ingancin bidiyo</span>
+            <select id="selRes"><option value="480">480p – ƙarami</option><option value="720" selected>720p – HD</option><option value="1080">1080p – Full HD</option></select>
+          </label>
+          <button id="btnMake" class="big grad"><i class="fa-solid fa-wand-magic-sparkles"></i> Hada Bidiyo Gaba ɗaya</button>
+          <div class="row">
+            <button id="btnSaveDev" class="btn"><i class="fa-solid fa-floppy-disk"></i> Ajiye a na'ura</button>
+            <button id="btnShareCC" class="btn"><i class="fa-solid fa-share-nodes"></i> CapCut / YouCut</button>
+          </div>
+          <button id="btnOpenOut" class="btn hidden"><i class="fa-solid fa-circle-play"></i> Duba bidiyon da aka gama</button>
+          <p class="hint">Hadawa tana ɗaukar tsawon bidiyon. Kar ka fita daga shafin kuma kada ka kashe allo har sai ta gama.</p>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<div class="hid"></div>
+
+<div id="mNew" class="modal">
+  <div class="card-modal">
+    <button class="mx" data-close="mNew" aria-label="Rufe"><i class="fa-solid fa-xmark"></i></button>
+    <h3><i class="fa-solid fa-pen-to-square"></i> Sunan Project</h3>
+    <input id="newName" class="inp" maxlength="60" placeholder="Rubuta sunan project...">
+    <p id="newErr" class="err hidden">Dole ne ka rubuta suna tukuna.</p>
+    <div class="row">
+      <button id="newCancel" class="btn">Soke</button>
+      <button id="newOk" class="cta"><i class="fa-solid fa-check"></i><span>Ƙirƙira</span></button>
+    </div>
+  </div>
+</div>
+
+<div id="mRec" class="modal dark">
+  <div class="rec-box">
+    <button id="recX" class="mx" aria-label="Soke"><i class="fa-solid fa-xmark"></i></button>
+    <div id="recCount" class="rec-count">3</div>
+    <div class="meter"><i id="recMeter"></i></div>
+    <p id="recTime" class="rec-time">0:00</p>
+    <p class="hint">Bidiyo yana wasa ba tare da sauti ba yayin rikodi, don makirufo ya ɗauki muryarka kaɗai. Yi magana kusa da makirufo a wuri mai natsuwa.</p>
+    <p id="recNote" class="info hidden"></p>
+    <div class="row">
+      <button id="recCancel" class="btn">Soke</button>
+      <button id="recStop" class="big red hidden"><i class="fa-solid fa-stop"></i> Tsaya</button>
+    </div>
+  </div>
+</div>
+
+<div id="mReview" class="modal">
+  <div class="card-modal">
+    <button class="mx" id="revX" aria-label="Soke"><i class="fa-solid fa-xmark"></i></button>
+    <h3><i class="fa-solid fa-headphones"></i> Saurari rikodin</h3>
+    <audio id="revAudio" controls></audio>
+    <p id="revInfo" class="info"></p>
+    <div class="row">
+      <button id="revRedo" class="btn"><i class="fa-solid fa-rotate-right"></i> Maimaita</button>
+      <button id="revDrop" class="btn danger"><i class="fa-solid fa-xmark"></i> Soke</button>
+      <button id="revSave" class="cta"><i class="fa-solid fa-floppy-disk"></i><span>Ajiye</span></button>
+    </div>
+  </div>
+</div>
+
+<div id="mBusy" class="modal dark">
+  <div class="rec-box">
+    <button id="busyX" class="mx hidden" aria-label="Soke"><i class="fa-solid fa-xmark"></i></button>
+    <div class="spinner"></div>
+    <p id="busyText" class="info">Ana aiki...</p>
+    <div class="bar hidden" id="busyBarWrap"><i id="busyBar"></i></div>
+    <b id="busyPct" class="pct hidden">0%</b>
+    <p id="busyHint" class="hint hidden">Kar ka fita daga shafin, kuma kada allo ya kashe.</p>
+    <button id="busyCancel" class="btn hidden">Soke</button>
+  </div>
+</div>
+
+<div id="mResult" class="modal">
+  <div class="card-modal wide">
+    <button class="mx" data-close="mResult" id="resX" aria-label="Rufe"><i class="fa-solid fa-xmark"></i></button>
+    <h3><i class="fa-solid fa-circle-check"></i> An gama bidiyo</h3>
+    <div class="vwrap"><video id="resVid" controls playsinline></video></div>
+    <p id="resInfo" class="info"></p>
+    <div class="row">
+      <button id="resFull" class="btn"><i class="fa-solid fa-expand"></i> Full screen</button>
+      <button id="resOpen" class="btn"><i class="fa-solid fa-up-right-from-square"></i> Buɗe a sabon shafi</button>
+    </div>
+    <div class="row">
+      <button id="resSave" class="cta"><i class="fa-solid fa-floppy-disk"></i><span>Ajiye a na'ura</span></button>
+      <button id="resShare" class="cta alt"><i class="fa-solid fa-share-nodes"></i><span>CapCut / YouCut</span></button>
+    </div>
+  </div>
+</div>
+
+<div id="mInstall" class="modal">
+  <div class="card-modal">
+    <button class="mx" data-close="mInstall" aria-label="Rufe"><i class="fa-solid fa-xmark"></i></button>
+    <h3><i class="fa-solid fa-download"></i> Saka app a na'ura</h3>
+    <p class="hint"><b>Android (Chrome):</b> danna maɓallin ⋮ a sama, sai “Add to Home screen” ko “Install app”.</p>
+    <p class="hint"><b>iPhone (Safari):</b> danna maɓallin Share, sai “Add to Home Screen”.</p>
+    <p class="hint"><b>Kwamfuta (Chrome/Edge):</b> danna alamar install a ƙarshen address bar.</p>
+    <p class="hint">Bayan an buɗe shafin sau ɗaya da intanet, komai yana aiki ba tare da intanet ba.</p>
+    <button class="cta" data-close="mInstall"><i class="fa-solid fa-check"></i><span>To</span></button>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<input type="file" id="fAll" accept="video/*,image/*" multiple hidden>
+<input type="file" id="fDir" webkitdirectory multiple hidden>
+<input type="file" id="fAud" accept="audio/*" hidden>
+<input type="file" id="fLogo" accept="image/*" hidden>
+<input type="file" id="fOvImg" accept="image/*" multiple hidden>
+<input type="file" id="fOvVid" accept="video/*" multiple hidden>
+
+<script src="index.js"></script>
+</body>
+</html>
